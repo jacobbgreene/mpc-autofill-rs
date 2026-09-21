@@ -55,6 +55,36 @@ pub fn product_controls_ready(
 
 pub const NEXT_STEP: &str = "oDesign.setNextStep();";
 
+/// Read-only readiness probe for the front text editor. `setNextStep` exists
+/// before the text editor's `Init` fills `UnpickList`; calling it then makes
+/// `readySave` call `reset` against `null`. The bundle initializes DesignList
+/// to an empty Array in the constructor, so it must be an Array but need not
+/// yet have the same length as UnpickList.
+pub const FRONT_TEXT_STATE: &str = "(function(){var front='/design/dn_texteditor_front.aspx';\
+ if(location.pathname!==front)return 'wrong-stage';\
+ if(document.readyState==='loading')return 'document-loading';\
+ var layer=window.oLayer,design=window.oDesign;\
+ if(!layer)return 'missing-layer';if(layer.LoadStatus==='Loading')return 'layer-loading';\
+ if(!design)return 'missing-design';\
+ if(typeof design.setNextStep!=='function'||typeof design.getUnpickList!=='function'||typeof design.getDesignList!=='function')return 'missing-text-methods';\
+ if(!design.parameters||!design.parameters.Base||design.parameters.Base.Layer!=='front')return 'wrong-layer';\
+ var unpick,designList;try{unpick=design.getUnpickList();designList=design.getDesignList();}catch(e){return 'list-error';}\
+ if(!Array.isArray(unpick)||unpick.length===0)return 'uninitialized-unpick-list';\
+ if(!Array.isArray(designList))return 'uninitialized-design-list';\
+ if(!document.getElementById('btn_next_step'))return 'missing-next-button';\
+ return 'ready';})()";
+
+/// Advance from the ready front text editor. Recheck every prerequisite in the
+/// emitted mutation so a poll-to-click turnover cannot save/reset null lists.
+pub fn advance_front_text() -> String {
+    format!(
+        "(function(){{if({FRONT_TEXT_STATE}!==\"ready\")throw new Error('front text editor is no longer ready');oDesign.setNextStep();}})()"
+    )
+}
+
+/// Read-only proof that the text editor navigation reached the backs page.
+pub const BACKS_DESTINATION_STATE: &str = "(function(){var back='/products/playingcard/design/dn_playingcards_back_dynamic.aspx';if(location.pathname!==back)return 'wrong-stage';return document.readyState==='loading'?'document-loading':'ready';})()";
+
 /// Whether the personalized editor's iframe and its quantity control are ready
 /// for use. `doPersonalize` navigates, so the outer page being idle alone is
 /// not enough to make this nested document available.
