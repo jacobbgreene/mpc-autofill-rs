@@ -246,26 +246,53 @@ pub fn select_smallest_bracket(dropdown_id: &str, quantity: u32) -> String {
 /// created `PageLayout` yet on this transition; that is its legacy one-image
 /// layout, not a reason to block mode selection.
 pub const INITIAL_LAYOUT_HAS_SLOT_ONE: &str =
-    "(function(){try{return PageLayout.prototype.getElement3('dnImg','1') != null;}catch(e){return false;}})()";
+    "(function(){var l=window.PageLayout&&PageLayout.prototype;if(!l||typeof l.getElement3!=='function'||l.IndexObj==null)return false;return l.getElement3('dnImg','1')!=null;})()";
 
-/// Does the editor currently have a slot element for `slot`?
-pub fn slot_exists(slot: u32) -> String {
-    format!("PageLayout.prototype.getElement3('dnImg', '{slot}') != null")
-}
-
-/// The PID currently occupying `slot`, or an empty string.
-pub fn pid_in_slot(slot: u32) -> String {
+/// Read-only state of an editor image slot. `getElement3` dereferences
+/// `IndexObj`, which MPC leaves null until `renderBodyAfter`; guard that exact
+/// prerequisite without suppressing unrelated editor exceptions.
+pub fn slot_state(slot: u32) -> String {
     format!(
-        "(function(){{var e=PageLayout.prototype.getElement3('dnImg','{slot}');\
-         return e ? (e.getAttribute('pid') || '') : '';}})()"
+        "(function(){{var l=window.PageLayout&&PageLayout.prototype;\
+         if(!l||typeof l.getElement3!=='function')return 'uninitialized-layout';\
+         if(l.IndexObj==null)return 'uninitialized-index';\
+         return l.getElement3('dnImg','{slot}')==null?'missing-slot':'ready';}})()"
     )
 }
 
-/// Drop the image identified by `pid` into `slot`.
-pub fn insert_into_slot(slot: u32, pid: &str) -> String {
+/// Does the editor currently have a slot element for `slot`? Retained callers
+/// receive a guarded boolean, while broken editor methods still propagate.
+pub fn slot_exists(slot: u32) -> String {
+    format!("({}==='ready')", slot_state(slot))
+}
+
+/// The PID currently occupying `slot`, or an empty string when its actual
+/// target has no PID. Missing or uninitialized slots are prerequisites, not
+/// empty targets, and therefore fail descriptively.
+pub fn pid_in_slot(slot: u32) -> String {
     format!(
-        "PageLayout.prototype.applyDragPhoto(\
-         PageLayout.prototype.getElement3('dnImg','{slot}'), 0, '{pid}');"
+        "(function(){{var l=window.PageLayout&&PageLayout.prototype;\
+         if(!l||typeof l.getElement3!=='function')throw new Error('editor slot {slot} prerequisite: uninitialized-layout');\
+         if(l.IndexObj==null)throw new Error('editor slot {slot} prerequisite: uninitialized-index');\
+         var e=l.getElement3('dnImg','{slot}');\
+         if(e==null)throw new Error('editor slot {slot} prerequisite: missing-slot');\
+         return e.getAttribute('pid')||'';}})()"
+    )
+}
+
+/// Drop the image identified by `pid` into `slot`. Revalidate every layout
+/// prerequisite immediately before this mutation; no absent target is passed
+/// to the editor and exceptions are deliberately not caught or retried here.
+pub fn insert_into_slot(slot: u32, pid: &str) -> String {
+    let pid = escape(pid);
+    format!(
+        "(function(){{var l=window.PageLayout&&PageLayout.prototype;\
+         if(!l||typeof l.getElement3!=='function')throw new Error('editor slot {slot} prerequisite: uninitialized-layout');\
+         if(l.IndexObj==null)throw new Error('editor slot {slot} prerequisite: uninitialized-index');\
+         var e=l.getElement3('dnImg','{slot}');\
+         if(e==null)throw new Error('editor slot {slot} prerequisite: missing-slot');\
+         if(typeof l.applyDragPhoto!=='function')throw new Error('editor slot {slot} prerequisite: missing-applyDragPhoto');\
+         l.applyDragPhoto(e,0,'{pid}');}})()"
     )
 }
 
@@ -314,6 +341,9 @@ mod tests {
             product_controls_ready("paper", None, None),
             product_controls_ready("paper", Some("quantity"), Some("effect")),
             NEXT_STEP.to_owned(),
+            FRONT_TEXT_STATE.to_owned(),
+            advance_front_text(),
+            BACKS_DESTINATION_STATE.to_owned(),
             EDITOR_QUANTITY_READY.to_owned(),
             BACK_CHOOSER_STATE.to_owned(),
             open_back_chooser(),
@@ -333,6 +363,7 @@ mod tests {
             product_configuration_matches("paper", "S33", "quantity", 54, "effect", Some("EF_055")),
             select_smallest_bracket("quantity", 54),
             INITIAL_LAYOUT_HAS_SLOT_ONE.to_owned(),
+            slot_state(1),
             slot_exists(1),
             pid_in_slot(1),
             insert_into_slot(1, "pid-1"),
@@ -345,6 +376,49 @@ mod tests {
                 &snippet,
             );
         }
+    }
+
+    #[test]
+    fn front_text_readiness_is_read_only_and_guards_advance() {
+        let ready_setup = "let calls=0;global.window=global;global.location={pathname:'/design/dn_texteditor_front.aspx'};global.document={readyState:'complete',getElementById:id=>id==='btn_next_step'?{}:null};global.oLayer={LoadStatus:'Idle'};global.oDesign={setNextStep:()=>calls++,getUnpickList:()=>['image'],getDesignList:()=>[],parameters:{Base:{Layer:'front'}}};";
+        assert_eq!(evaluate(FRONT_TEXT_STATE, ready_setup), "ready");
+        assert_eq!(
+            execute_and_observe(&advance_front_text(), ready_setup, "calls"),
+            "1"
+        );
+        // The constructor deliberately starts DesignList as []; readiness must
+        // not require it to mirror the already-populated unpick list.
+        assert_eq!(evaluate(FRONT_TEXT_STATE, ready_setup), "ready");
+
+        for (setup, expected) in [
+            ("global.location={pathname:'/products/playingcard/design/dn_playingcards_front_dynamic.aspx'};global.document={readyState:'complete',getElementById:()=>null};", "wrong-stage"),
+            ("global.location={pathname:'/design/dn_texteditor_front.aspx'};global.document={readyState:'loading',getElementById:()=>null};", "document-loading"),
+            ("global.window=global;global.location={pathname:'/design/dn_texteditor_front.aspx'};global.document={readyState:'complete',getElementById:()=>({})};", "missing-layer"),
+            ("global.window=global;global.location={pathname:'/design/dn_texteditor_front.aspx'};global.document={readyState:'complete',getElementById:()=>({})};global.oLayer={LoadStatus:'Loading'};", "layer-loading"),
+            ("global.window=global;global.location={pathname:'/design/dn_texteditor_front.aspx'};global.document={readyState:'complete',getElementById:()=>({})};global.oLayer={LoadStatus:'Idle'};global.oDesign=null;", "missing-design"),
+            ("global.window=global;global.location={pathname:'/design/dn_texteditor_front.aspx'};global.document={readyState:'complete',getElementById:()=>({})};global.oLayer={LoadStatus:'Idle'};global.oDesign={};", "missing-text-methods"),
+            ("global.window=global;global.location={pathname:'/design/dn_texteditor_front.aspx'};global.document={readyState:'complete',getElementById:()=>({})};global.oLayer={LoadStatus:'Idle'};global.oDesign={setNextStep:()=>{},getUnpickList:()=>[],getDesignList:()=>[],parameters:{Base:{Layer:'front'}}};", "uninitialized-unpick-list"),
+            ("global.window=global;global.location={pathname:'/design/dn_texteditor_front.aspx'};global.document={readyState:'complete',getElementById:()=>({})};global.oLayer={LoadStatus:'Idle'};global.oDesign={setNextStep:()=>{},getUnpickList:()=>null,getDesignList:()=>[],parameters:{Base:{Layer:'front'}}};", "uninitialized-unpick-list"),
+            ("global.window=global;global.location={pathname:'/design/dn_texteditor_front.aspx'};global.document={readyState:'complete',getElementById:()=>null};global.oLayer={LoadStatus:'Idle'};global.oDesign={setNextStep:()=>{},getUnpickList:()=>['image'],getDesignList:()=>[],parameters:{Base:{Layer:'front'}}};", "missing-next-button"),
+        ] {
+            assert_eq!(evaluate(FRONT_TEXT_STATE, setup), expected);
+        }
+        assert_eq!(
+            evaluate(BACKS_DESTINATION_STATE, "global.location={pathname:'/design/dn_texteditor_front.aspx'};global.document={readyState:'complete'};"),
+            "wrong-stage"
+        );
+        assert_eq!(
+            evaluate(BACKS_DESTINATION_STATE, "global.location={pathname:'/products/playingcard/design/dn_playingcards_back_dynamic.aspx'};global.document={readyState:'complete'};"),
+            "ready"
+        );
+
+        let not_ready =
+            ready_setup.replace("getUnpickList:()=>['image']", "getUnpickList:()=>null");
+        let output = node(
+            &format!("{}\ntry{{eval(process.argv[1])}}catch(e){{process.stdout.write(calls+':'+e.message)}}", not_ready),
+            &advance_front_text(),
+        );
+        assert_eq!(output, "0:front text editor is no longer ready");
     }
 
     #[test]
@@ -676,42 +750,82 @@ mod tests {
     }
 
     #[test]
-    fn layout_and_slot_helpers_target_the_requested_slot_and_pid() {
+    fn layout_and_slot_helpers_guard_index_and_only_mutate_ready_targets() {
+        let source_faithful = "global.window=global;global.document={getElementById:id=>global.dom[id]||null};global.PageLayout={prototype:{IndexObj:null,getElement3:function(kind,photoIndex){return document.getElementById(this.IndexObj[photoIndex]);}}};global.dom={};";
         assert_eq!(
-            evaluate(INITIAL_LAYOUT_HAS_SLOT_ONE, "global.PageLayout=undefined;"),
-            "false",
-            "a missing initial layout means there is no second slot"
+            evaluate(INITIAL_LAYOUT_HAS_SLOT_ONE, source_faithful),
+            "false"
         );
         assert_eq!(
-            execute_and_observe(
-                &slot_exists(7),
-                "let requested='';global.PageLayout={prototype:{getElement3:(kind,slot)=>{requested=kind+':'+slot;return null}}};",
-                "requested",
-            ),
-            "dnImg:7"
+            evaluate(&slot_state(7), source_faithful),
+            "uninitialized-index"
+        );
+        assert_eq!(evaluate(&slot_exists(7), source_faithful), "false");
+
+        let empty_map = source_faithful.replace("IndexObj:null", "IndexObj:{}");
+        assert_eq!(evaluate(&slot_state(7), &empty_map), "missing-slot");
+        let mapped_absent = source_faithful.replace("IndexObj:null", "IndexObj:{'7':'gone'}");
+        assert_eq!(evaluate(&slot_state(7), &mapped_absent), "missing-slot");
+        let missing_pid_output = node(
+            &format!("{mapped_absent}\ntry{{eval(process.argv[1])}}catch(e){{process.stdout.write(e.message)}}"),
+            &pid_in_slot(7),
         );
         assert_eq!(
-            execute_and_observe(
-                &pid_in_slot(7),
-                "let requested='';global.PageLayout={prototype:{getElement3:(kind,slot)=>{requested=kind+':'+slot;return {getAttribute:name=>name==='pid'?'wanted-pid':''}}}};",
-                "requested",
-            ),
-            "dnImg:7"
+            missing_pid_output,
+            "editor slot 7 prerequisite: missing-slot"
         );
-        assert_eq!(
-            evaluate(
-                &pid_in_slot(7),
-                "global.PageLayout={prototype:{getElement3:()=>({getAttribute:name=>name==='pid'?'wanted-pid':''})}};",
-            ),
-            "wanted-pid"
+
+        let missing_pid = source_faithful
+            .replace("IndexObj:null", "IndexObj:{'7':'occupied'}")
+            .replace(
+                "global.dom={};",
+                "global.dom={occupied:{getAttribute:()=>null}};",
+            );
+        assert_eq!(evaluate(&slot_state(7), &missing_pid), "ready");
+        assert_eq!(evaluate(&pid_in_slot(7), &missing_pid), "");
+
+        let unrelated = source_faithful
+            .replace("IndexObj:null", "IndexObj:{}")
+            .replace(
+                "return document.getElementById(this.IndexObj[photoIndex]);",
+                "throw new Error('unrelated getElement3 failure');",
+            );
+        let output = node(
+            &format!("{unrelated}\ntry{{eval(process.argv[1])}}catch(e){{process.stdout.write(e.message)}}"),
+            &slot_state(7),
         );
+        assert_eq!(output, "unrelated getElement3 failure");
+        let initial_output = node(
+            &format!("{unrelated}\ntry{{eval(process.argv[1])}}catch(e){{process.stdout.write(e.message)}}"),
+            INITIAL_LAYOUT_HAS_SLOT_ONE,
+        );
+        assert_eq!(initial_output, "unrelated getElement3 failure");
+
+        for (setup, expected) in [
+            (source_faithful.to_owned(), "uninitialized-index"),
+            (empty_map.clone(), "missing-slot"),
+        ] {
+            let output = node(
+                &format!("{setup}\nlet calls=0;PageLayout.prototype.applyDragPhoto=()=>calls++;try{{eval(process.argv[1])}}catch(e){{process.stdout.write(calls+':'+e.message)}}"),
+                &insert_into_slot(7, "wanted-pid"),
+            );
+            assert_eq!(output, format!("0:editor slot 7 prerequisite: {expected}"));
+        }
+
+        let ready = source_faithful
+            .replace("IndexObj:null", "IndexObj:{'7':'target'}")
+            .replace(
+                "global.dom={};",
+                "global.dom={target:{getAttribute:name=>name==='pid'?'wanted-pid':null}};",
+            );
+        assert_eq!(evaluate(&pid_in_slot(7), &ready), "wanted-pid");
         assert_eq!(
             execute_and_observe(
                 &insert_into_slot(7, "wanted-pid"),
-                "let inserted='';global.PageLayout={prototype:{getElement3:(kind,slot)=>({kind,slot}),applyDragPhoto:(element,offset,pid)=>{inserted=element.kind+':'+element.slot+':'+offset+':'+pid}}};",
-                "inserted",
+                &format!("{ready}let calls=0;PageLayout.prototype.applyDragPhoto=(element,offset,pid)=>{{calls++;global.result=(element===dom.target)+':'+offset+':'+pid}};"),
+                "calls+':'+result",
             ),
-            "dnImg:7:0:wanted-pid"
+            "1:true:0:wanted-pid"
         );
     }
 

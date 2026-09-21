@@ -257,16 +257,15 @@ impl Driver {
         self.wait_for_idle()
             .await
             .map_err(|error| Error::stage("backs/next-fronts", error))?;
+        self.wait_for_front_text_ready().await?;
 
-        // A confirmation popup can sit between the front and back steps.
+        // The text editor can show an instructional popup over its next button.
+        // Close it only after this is demonstrably the ready text-editor page.
         if let Ok(close) = self.page.find_element("#closeBtn").await {
             let _ = close.click().await;
         }
 
-        self.next_step("backs/next-backs").await?;
-        self.wait_for_idle()
-            .await
-            .map_err(|error| Error::stage("backs/next-backs", error))?;
+        self.advance_front_text_to_backs().await?;
 
         // This deliberately precedes renderDesignCount, but must not wait for
         // PageLayout or slot zero: either may be absent in the initial
@@ -431,6 +430,31 @@ impl Driver {
 
     // region editor timing helpers
 
+    async fn wait_for_front_text_ready(&self) -> Result<()> {
+        wait_for_editor_state_with(
+            "front-text/wait-ready",
+            Instant::now() + DEFINE_TIMEOUT,
+            POLL,
+            |deadline| async move { self.eval_string_until(js::FRONT_TEXT_STATE, deadline).await },
+        )
+        .await
+    }
+
+    async fn advance_front_text_to_backs(&self) -> Result<()> {
+        advance_front_text_to_backs_with(
+            Instant::now() + DEFINE_TIMEOUT,
+            Instant::now() + DEFINE_TIMEOUT,
+            POLL,
+            |deadline| async move { self.eval_string_until(js::FRONT_TEXT_STATE, deadline).await },
+            || async move { self.run(js::advance_front_text()).await },
+            |deadline| async move {
+                self.eval_string_until(js::BACKS_DESTINATION_STATE, deadline)
+                    .await
+            },
+        )
+        .await
+    }
+
     async fn next_step(&self, stage: &'static str) -> Result<()> {
         self.wait_for_idle()
             .await
@@ -569,17 +593,13 @@ impl Driver {
     }
 
     async fn wait_for_slot(&self, slot: u32) -> Result<()> {
-        let deadline = Instant::now() + DEFINE_TIMEOUT;
-        let exists = js::slot_exists(slot);
-        while !self.eval_bool_during_poll(&exists, deadline).await? {
-            if Instant::now() >= deadline {
-                return Err(Error::Site(format!(
-                    "timed out waiting for required editor slot {slot}"
-                )));
-            }
-            sleep(Duration::from_millis(200)).await;
-        }
-        Ok(())
+        wait_for_editor_state_with(
+            "editor-slot/wait-ready",
+            Instant::now() + DEFINE_TIMEOUT,
+            POLL,
+            |deadline| async move { self.eval_string_until(js::slot_state(slot), deadline).await },
+        )
+        .await
     }
 
     /// A navigation can replace Chrome's execution context between two polling
@@ -684,6 +704,83 @@ fn select_back_mode(common_back_eligible: bool, same_layout: bool) -> ImageMode 
     } else {
         ImageMode::Different
     }
+}
+
+/// Poll a read-only transition state to readiness with a bounded, useful
+/// diagnosis. The probe is deliberately responsible for reporting null or
+/// incomplete editor state; it never repairs that state.
+async fn wait_for_editor_state_with<R, RFut>(
+    stage: &'static str,
+    deadline: Instant,
+    poll: Duration,
+    mut read_state: R,
+) -> Result<()>
+where
+    R: FnMut(Instant) -> RFut,
+    RFut: Future<Output = Result<String>>,
+{
+    let mut last_state = None;
+    loop {
+        // The preceding poll sleep may have exhausted the shared evaluation
+        // budget. Do not start a fresh probe after that point.
+        if Instant::now() >= deadline {
+            let state = last_state.as_deref().unwrap_or("unobserved");
+            return Err(Error::Site(format!(
+                "{stage}: timed out waiting for ready state (state: {state})"
+            )));
+        }
+        match read_state(deadline).await {
+            Ok(state) => {
+                if state == "ready" {
+                    return Ok(());
+                }
+                last_state = Some(state);
+            }
+            // A bounded evaluation can expire while this final probe is in
+            // flight. It is the polling deadline, so retain the last observed
+            // state in the diagnostic rather than returning a generic CDP timeout.
+            Err(Error::Cdp(CdpError::Timeout)) if Instant::now() >= deadline => {
+                let state = last_state.as_deref().unwrap_or("unobserved");
+                return Err(Error::Site(format!(
+                    "{stage}: timed out waiting for ready state (state: {state})"
+                )));
+            }
+            // These errors only mean a read-only probe lost its execution
+            // context. Unlike mutations, it is safe to observe again while
+            // retaining the caller's original deadline.
+            Err(error) if is_context_turnover_error(&error) => {}
+            Err(error) => return Err(Error::stage(stage, error)),
+        }
+        sleep(poll).await;
+    }
+}
+
+/// Advance the ready front text editor once, then require proof of the backs
+/// destination. An execution-context destruction can happen after the editor
+/// mutation ran, so it is resolved only by destination proof and never replayed.
+async fn advance_front_text_to_backs_with<F, FFut, A, AFut, B, BFut>(
+    front_deadline: Instant,
+    backs_deadline: Instant,
+    poll: Duration,
+    read_front: F,
+    mut advance: A,
+    read_backs: B,
+) -> Result<()>
+where
+    F: FnMut(Instant) -> FFut,
+    FFut: Future<Output = Result<String>>,
+    A: FnMut() -> AFut,
+    AFut: Future<Output = Result<()>>,
+    B: FnMut(Instant) -> BFut,
+    BFut: Future<Output = Result<String>>,
+{
+    wait_for_editor_state_with("front-text/advance", front_deadline, poll, read_front).await?;
+    match advance().await {
+        Ok(()) => {}
+        Err(error) if is_context_destroyed_error(&error) => {}
+        Err(error) => return Err(Error::stage("front-text/advance", error)),
+    }
+    wait_for_editor_state_with("backs/wait-backs", backs_deadline, poll, read_backs).await
 }
 
 /// State-machine core for back chooser acquisition. Keeping the read and the
@@ -902,6 +999,300 @@ mod tests {
     #[tokio::test]
     async fn openable_chooser_opens_once_then_waits_through_loading() {
         assert_eq!(acquire_sequence(&["openable", "loading", "ready"]).await, 1);
+    }
+
+    #[tokio::test]
+    async fn slot_wait_transitions_from_uninitialized_index_through_missing_to_ready() {
+        use std::collections::VecDeque;
+        use std::sync::{Arc, Mutex};
+
+        let states = Arc::new(Mutex::new(VecDeque::from([
+            "uninitialized-index".to_owned(),
+            "missing-slot".to_owned(),
+            "ready".to_owned(),
+        ])));
+        wait_for_editor_state_with(
+            "editor-slot/wait-ready",
+            Instant::now() + Duration::from_secs(1),
+            Duration::ZERO,
+            {
+                let states = Arc::clone(&states);
+                move |_| {
+                    let state = states
+                        .lock()
+                        .expect("state queue lock")
+                        .pop_front()
+                        .unwrap();
+                    async move { Ok(state) }
+                }
+            },
+        )
+        .await
+        .expect("slot becomes ready");
+    }
+
+    #[tokio::test]
+    async fn slot_wait_timeout_reports_its_last_state() {
+        let error = wait_for_editor_state_with(
+            "editor-slot/wait-ready",
+            Instant::now() + Duration::from_millis(10),
+            Duration::from_secs(1),
+            |_| async { Ok("missing-slot".to_owned()) },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "editor-slot/wait-ready: timed out waiting for ready state (state: missing-slot)"
+        );
+    }
+
+    #[tokio::test]
+    async fn slot_wait_final_evaluation_timeout_keeps_uninitialized_index_state() {
+        let attempts = std::sync::atomic::AtomicUsize::new(0);
+        let error = wait_for_editor_state_with(
+            "editor-slot/wait-ready",
+            Instant::now() + Duration::from_millis(10),
+            Duration::ZERO,
+            |deadline| {
+                let attempt = attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async move {
+                    if attempt == 0 {
+                        Ok("uninitialized-index".to_owned())
+                    } else {
+                        tokio::time::timeout_at(deadline, std::future::pending::<()>())
+                            .await
+                            .map(|_| "ready".to_owned())
+                            .map_err(|_| Error::Cdp(CdpError::Timeout))
+                    }
+                }
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "editor-slot/wait-ready: timed out waiting for ready state (state: uninitialized-index)"
+        );
+        assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn slot_wait_context_rejections_until_deadline_keep_uninitialized_index_state() {
+        let attempts = std::sync::atomic::AtomicUsize::new(0);
+        let error = wait_for_editor_state_with(
+            "editor-slot/wait-ready",
+            Instant::now() + Duration::from_millis(10),
+            Duration::from_millis(1),
+            |_| {
+                let attempt = attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async move {
+                    if attempt == 0 {
+                        Ok("uninitialized-index".to_owned())
+                    } else {
+                        Err(missing_context())
+                    }
+                }
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "editor-slot/wait-ready: timed out waiting for ready state (state: uninitialized-index)"
+        );
+        assert!(attempts.load(std::sync::atomic::Ordering::SeqCst) > 1);
+    }
+
+    #[tokio::test]
+    async fn editor_state_wait_recovers_from_delayed_ready_state() {
+        use std::collections::VecDeque;
+        use std::sync::{Arc, Mutex};
+
+        let states = Arc::new(Mutex::new(VecDeque::from([
+            "layer-loading".to_owned(),
+            "ready".to_owned(),
+        ])));
+        wait_for_editor_state_with(
+            "front-text/wait-ready",
+            Instant::now() + Duration::from_secs(1),
+            Duration::ZERO,
+            {
+                let states = Arc::clone(&states);
+                move |_| {
+                    let state = states
+                        .lock()
+                        .expect("state queue lock")
+                        .pop_front()
+                        .unwrap();
+                    async move { Ok(state) }
+                }
+            },
+        )
+        .await
+        .expect("the delayed ready state is accepted");
+    }
+
+    #[tokio::test]
+    async fn editor_state_wait_recovers_from_context_turnover_read_probes() {
+        let probes = std::sync::atomic::AtomicUsize::new(0);
+        wait_for_editor_state_with(
+            "front-text/wait-ready",
+            Instant::now() + Duration::from_secs(1),
+            Duration::ZERO,
+            |_| {
+                let probe = probes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async move {
+                    match probe {
+                        0 => Err(missing_context()),
+                        1 => Err(destroyed_context()),
+                        _ => Ok("ready".to_owned()),
+                    }
+                }
+            },
+        )
+        .await
+        .expect("context-turnover read-only probes can be retried");
+        assert_eq!(probes.load(std::sync::atomic::Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn editor_state_wait_propagates_permanent_probe_errors() {
+        let error = wait_for_editor_state_with(
+            "front-text/wait-ready",
+            Instant::now() + Duration::from_secs(1),
+            Duration::ZERO,
+            |_| async { Err(Error::Site("permanent probe failure".into())) },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "front-text/wait-ready: permanent probe failure"
+        );
+    }
+
+    #[tokio::test]
+    async fn editor_state_wait_propagates_evaluation_timeout_before_deadline() {
+        let error = wait_for_editor_state_with(
+            "front-text/wait-ready",
+            Instant::now() + Duration::from_secs(1),
+            Duration::ZERO,
+            |_| async { Err(Error::Cdp(CdpError::Timeout)) },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.to_string(), "front-text/wait-ready: Request timed out.");
+    }
+
+    #[tokio::test]
+    async fn editor_state_timeout_after_sleep_keeps_last_state_without_another_probe() {
+        let probes = std::sync::atomic::AtomicUsize::new(0);
+        let error = wait_for_editor_state_with(
+            "front-text/wait-ready",
+            Instant::now() + Duration::from_millis(10),
+            Duration::from_secs(1),
+            |_| {
+                probes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async { Ok("layer-loading".to_owned()) }
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "front-text/wait-ready: timed out waiting for ready state (state: layer-loading)"
+        );
+        assert_eq!(probes.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn absent_backs_destination_times_out_with_last_state_without_replaying_mutation() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let advances = AtomicUsize::new(0);
+        let destination_probes = AtomicUsize::new(0);
+        let error = advance_front_text_to_backs_with(
+            Instant::now() + Duration::from_secs(1),
+            Instant::now() + Duration::from_millis(20),
+            Duration::from_millis(1),
+            |_| async { Ok("ready".to_owned()) },
+            || {
+                advances.fetch_add(1, Ordering::SeqCst);
+                async { Ok(()) }
+            },
+            |_| {
+                destination_probes.fetch_add(1, Ordering::SeqCst);
+                async { Ok("wrong-stage".to_owned()) }
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "backs/wait-backs: timed out waiting for ready state (state: wrong-stage)"
+        );
+        assert_eq!(advances.load(Ordering::SeqCst), 1);
+        assert!(destination_probes.load(Ordering::SeqCst) > 0);
+    }
+
+    #[tokio::test]
+    async fn destroyed_front_text_advance_is_proven_by_backs_without_replay() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let advances = Arc::new(AtomicUsize::new(0));
+        advance_front_text_to_backs_with(
+            Instant::now() + Duration::from_secs(1),
+            Instant::now() + Duration::from_secs(1),
+            Duration::ZERO,
+            |_| async { Ok("ready".to_owned()) },
+            {
+                let advances = Arc::clone(&advances);
+                move || {
+                    advances.fetch_add(1, Ordering::SeqCst);
+                    async { Err(destroyed_context()) }
+                }
+            },
+            |_| async { Ok("ready".to_owned()) },
+        )
+        .await
+        .expect("the destination proves the single mutation succeeded");
+        assert_eq!(advances.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn front_text_advance_failure_is_surfaced_without_destination_probe() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let advances = Arc::new(AtomicUsize::new(0));
+        let backs_reads = Arc::new(AtomicUsize::new(0));
+        let error = advance_front_text_to_backs_with(
+            Instant::now() + Duration::from_secs(1),
+            Instant::now() + Duration::from_secs(1),
+            Duration::ZERO,
+            |_| async { Ok("ready".to_owned()) },
+            {
+                let advances = Arc::clone(&advances);
+                move || {
+                    advances.fetch_add(1, Ordering::SeqCst);
+                    async { Err(Error::Site("advance failed".into())) }
+                }
+            },
+            {
+                let backs_reads = Arc::clone(&backs_reads);
+                move |_| {
+                    backs_reads.fetch_add(1, Ordering::SeqCst);
+                    async { Ok("ready".to_owned()) }
+                }
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.to_string(), "front-text/advance: advance failed");
+        assert_eq!(advances.load(Ordering::SeqCst), 1);
+        assert_eq!(backs_reads.load(Ordering::SeqCst), 0);
     }
 
     fn protocol_error(code: i64, message: &str) -> Error {
