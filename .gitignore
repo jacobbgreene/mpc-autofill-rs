@@ -1,0 +1,7 @@
+/target
+**/target
+/frontend/node_modules
+/frontend/dist
+/cards
+.direnv
+result

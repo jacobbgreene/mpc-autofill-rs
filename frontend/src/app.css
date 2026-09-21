@@ -1,0 +1,219 @@
+:root {
+  --bg: #f7f7f9;
+  --panel: #ffffff;
+  --text: #1c1c1f;
+  --muted: #6b6b74;
+  --border: #e3e3e8;
+  --accent: #3b6cf6;
+  --ok: #2ea36b;
+  --fail: #d64545;
+  --busy: #d9a441;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17181c;
+    --panel: #1f1f24;
+    --text: #ececf0;
+    --muted: #9a9aa5;
+    --border: #2c2d34;
+    --accent: #5b83f7;
+  }
+}
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+main.app {
+  width: 100%;
+  max-width: 1000px;
+  box-sizing: border-box;
+  margin: 0 auto;
+  padding: 1.25rem;
+}
+.app header {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+.app .title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.app h1 {
+  font-size: 1.4rem;
+  margin: 0;
+}
+.app .meta {
+  min-width: 0;
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+.app .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.app button {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font: inherit;
+  padding: 0.5rem 0.9rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+}
+.app button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.app button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.app button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.app .banner {
+  margin: 1rem 0;
+  padding: 0.6rem 0.8rem;
+  border-radius: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  font-size: 0.9rem;
+}
+.app .banner.subtle {
+  color: var(--muted);
+}
+.app .banner.error {
+  border-color: var(--fail);
+  color: var(--fail);
+}
+.app .download-progress {
+  display: grid;
+  gap: 0.5rem;
+}
+.app .download-progress-copy {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.app .download-progress-bar {
+  width: 100%;
+  height: 0.6rem;
+  accent-color: var(--accent);
+}
+.app .download-progress-bar:indeterminate {
+  animation: progress-pulse 1.1s ease-in-out infinite alternate;
+}
+.app .download-failures {
+  margin: 0;
+  color: var(--fail);
+}
+@keyframes progress-pulse {
+  to {
+    opacity: 0.55;
+  }
+}
+.app .empty {
+  margin-top: 4rem;
+  text-align: center;
+  color: var(--muted);
+}
+.app .section {
+  margin-top: 1.5rem;
+}
+.app .section-title {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin: 0 0 0.6rem;
+}
+.app .grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 0.9rem;
+}
+.app figure {
+  margin: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.5rem;
+  position: relative;
+  overflow: hidden;
+  /* Let the engine skip rendering off-screen tiles — keeps scrolling smooth
+     with hundreds of images. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 240px;
+}
+.app figure.cardback {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.app .thumb {
+  position: relative;
+  aspect-ratio: 5 / 7;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg);
+  display: grid;
+  place-items: center;
+}
+.app .thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.app .placeholder {
+  color: var(--muted);
+  font-weight: 600;
+}
+.app .badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  border-radius: 999px;
+  padding: 0 0.4rem;
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+.app figcaption {
+  margin-top: 0.4rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.app .status-dot {
+  position: absolute;
+  top: 0.6rem;
+  left: 0.6rem;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--border);
+  z-index: 1;
+}
+.app .card.downloaded .status-dot,
+.app .card.inserted .status-dot {
+  background: var(--ok);
+}
+.app .card.download-failed .status-dot {
+  background: var(--fail);
+}
+.app .card.uploading .status-dot {
+  background: var(--busy);
+}

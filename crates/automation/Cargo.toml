@@ -1,0 +1,16 @@
+[package]
+name = "autofill-automation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+autofill-core = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+futures = "0.3"
+# The CDP transport is a plain ws://localhost socket, so no TLS feature is
+# needed; the `fetcher`/`rustls` features only pull in a Chrome downloader we
+# don't use (we drive the system browser).
+chromiumoxide = "0.9"

@@ -1,0 +1,86 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+//! MPC Autofill desktop app. The GUI is a thin shell: commands forward requests
+//! to the session actor (see [`session`]) and the actor streams progress back to
+//! the frontend as Tauri events.
+
+mod session;
+
+use std::path::PathBuf;
+
+use session::{Command, OrderSummary};
+use tauri::{Manager, State};
+use tokio::sync::{mpsc, oneshot};
+
+/// The only state the frontend touches: a handle to the session actor's inbox.
+struct AppState {
+    inbox: mpsc::Sender<Command>,
+}
+
+impl AppState {
+    /// Send a command to the actor and await its reply. Every command is a
+    /// request/response round-trip over a fresh oneshot channel.
+    async fn request<T>(
+        &self,
+        build: impl FnOnce(oneshot::Sender<Result<T, String>>) -> Command,
+    ) -> Result<T, String> {
+        let (reply, response) = oneshot::channel();
+        self.inbox.send(build(reply)).await.map_err(|_| "session is not running")?;
+        response.await.map_err(|_| "session dropped the request")?
+    }
+}
+
+#[tauri::command]
+async fn load_order(state: State<'_, AppState>, path: String) -> Result<OrderSummary, String> {
+    state
+        .request(|reply| Command::LoadOrder { path: PathBuf::from(path), reply })
+        .await
+}
+
+#[tauri::command]
+async fn thumbnails(state: State<'_, AppState>) -> Result<(), String> {
+    state.request(|reply| Command::LoadThumbnails { reply }).await
+}
+
+#[tauri::command]
+async fn download(state: State<'_, AppState>) -> Result<(), String> {
+    state.request(|reply| Command::Download { reply }).await
+}
+
+#[tauri::command]
+async fn fill(state: State<'_, AppState>) -> Result<(), String> {
+    state.request(|reply| Command::Fill { reply }).await
+}
+
+fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            let (inbox, receiver) = mpsc::channel(16);
+            // The actor needs an owned handle to emit events; this is the one
+            // framework handle we hand off, moved (not shared) into its task.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(session::run(receiver, handle));
+            app.manage(AppState { inbox });
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![load_order, thumbnails, download, fill])
+        .build(tauri::generate_context!())
+        .expect("failed to start MPC Autofill")
+        .run(|app, event| {
+            // On exit, ask the actor to close the browser so we don't orphan the
+            // visible Chrome window. Block briefly until it has torn down.
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                if let Some(state) = app.try_state::<AppState>() {
+                    let (reply, response) = oneshot::channel();
+                    if state.inbox.blocking_send(Command::Shutdown { reply }).is_ok() {
+                        let _ = tauri::async_runtime::block_on(response);
+                    }
+                }
+            }
+        });
+}
