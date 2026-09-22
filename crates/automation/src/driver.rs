@@ -31,6 +31,10 @@ const UPLOAD_TIMEOUT: Duration = Duration::from_secs(300);
 const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(300);
 const POLL: Duration = Duration::from_millis(100);
 const CONTEXT_RETRY_TIMEOUT: Duration = Duration::from_secs(2);
+/// `#uploadId` and friends are injected by the editor's scripts asynchronously
+/// after the page reports ready — authenticated sessions and spinner-forced
+/// reloads can stretch that injection well past a few seconds.
+const FIND_ELEMENT_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_TRIES: u32 = 3;
 
 /// The mode actually selected by the editor for a face.
@@ -66,6 +70,8 @@ impl Driver {
             .map_err(Error::Site)
             .map_err(|error| Error::stage("startup/browser-launch", error))?;
 
+        reap_orphaned_automation_browsers().await;
+
         let (browser, mut handler) = Browser::launch(config)
             .await
             .map_err(|error| Error::stage("startup/browser-launch", error.into()))?;
@@ -93,6 +99,13 @@ impl Driver {
     }
 
     // region authentication
+
+    /// Diagnostic escape hatch for probes/examples: evaluate read-only JS and
+    /// return its string value. Not used by the fill flow.
+    #[doc(hidden)]
+    pub async fn probe_string(&self, js: impl Into<Evaluation>) -> Result<String> {
+        self.eval_string(js).await
+    }
 
     pub async fn is_authenticated(&self) -> Result<bool> {
         let expr = format!(
@@ -467,18 +480,23 @@ impl Driver {
             .map_err(|error| Error::stage(stage, error))
     }
 
-    /// Find an element, retrying briefly to mimic Selenium's implicit wait — some
-    /// controls (e.g. the upload input) appear a beat after the page settles.
+    /// Find an element, polling to mimic Selenium's implicit wait — some
+    /// controls (e.g. the upload input) are injected by the editor's scripts a
+    /// beat after the page settles. Budget matches the editor's other lazy-init
+    /// waits rather than assuming the element is near-synchronous.
     async fn find_element(&self, selector: &str) -> Result<Element> {
-        for _ in 0..25 {
+        let deadline = Instant::now() + FIND_ELEMENT_TIMEOUT;
+        loop {
             if let Ok(element) = self.page.find_element(selector).await {
                 return Ok(element);
             }
+            if Instant::now() >= deadline {
+                return Err(Error::Site(format!(
+                    "timed out waiting for required editor element `{selector}`"
+                )));
+            }
             sleep(Duration::from_millis(200)).await;
         }
-        Err(Error::Site(format!(
-            "timed out waiting for required editor element `{selector}`"
-        )))
     }
 
     /// Wait for the loading spinner to disappear, reloading once if it hangs.
@@ -1520,6 +1538,77 @@ mod tests {
         )));
         assert!(!is_context_turnover_error(&Error::Cdp(CdpError::Timeout)));
     }
+}
+
+/// chromiumoxide always launches Chrome with a fixed
+/// `--user-data-dir=$TMP/chromiumoxide-runner` (its default when no data dir is
+/// configured). A Chrome orphaned by a killed or crashed run keeps that profile
+/// and makes every subsequent launch fail — the new process forwards to the
+/// live one and exits, surfacing as a launch error or the 20s launch timeout.
+/// `Driver::launch` only runs when this session holds no live driver, so any
+/// process on that profile belongs to a dead instance and is safe to reap.
+/// Linux-only and best-effort; other platforms keep the pre-existing behavior.
+#[cfg(target_os = "linux")]
+async fn reap_orphaned_automation_browsers() {
+    let profile = std::env::temp_dir().join("chromiumoxide-runner");
+    let needle = format!("--user-data-dir={}", profile.display()).into_bytes();
+
+    // chromiumoxide's default launch always includes this flag too; requiring
+    // both keeps stray tools that merely mention the profile path from matching.
+    let debugger_flag: &[u8] = b"--remote-debugging-port";
+    let mut pids: Vec<libc::pid_t> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir("/proc") {
+        for entry in entries.flatten() {
+            let Ok(pid) = entry.file_name().to_string_lossy().parse::<libc::pid_t>() else {
+                continue;
+            };
+            if pid == std::process::id() as libc::pid_t {
+                continue;
+            }
+            let Ok(cmdline) = std::fs::read(entry.path().join("cmdline")) else {
+                continue;
+            };
+            // Substring search, not argv matching: NixOS wrappers repack the
+            // whole command line into argv[0], and Chrome's child processes
+            // inherit the flags, so this catches the entire tree of any
+            // browser on the automation profile.
+            if contains_subslice(&cmdline, &needle) && contains_subslice(&cmdline, debugger_flag)
+            {
+                pids.push(pid);
+            }
+        }
+    }
+    if pids.is_empty() {
+        return;
+    }
+
+    tracing::warn!("reaping orphaned automation browser process(es): {pids:?}");
+    for &pid in &pids {
+        unsafe { libc::kill(pid, libc::SIGTERM) };
+    }
+    // SIGTERM lets Chrome shut down cleanly and release its profile lock;
+    // escalate to SIGKILL only for stragglers.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        pids.retain(|&pid| unsafe { libc::kill(pid, 0) } == 0);
+        if pids.is_empty() || Instant::now() >= deadline {
+            break;
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+    for &pid in &pids {
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn reap_orphaned_automation_browsers() {}
+
+#[cfg(target_os = "linux")]
+fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
+    !needle.is_empty()
+        && haystack.len() >= needle.len()
+        && haystack.windows(needle.len()).any(|window| window == needle)
 }
 
 /// Auto-accept any `alert`/`confirm`/`beforeunload` dialog the editor raises;

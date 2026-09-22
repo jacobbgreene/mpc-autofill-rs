@@ -7,6 +7,7 @@
 mod session;
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use session::{Command, OrderSummary};
 use tauri::{Manager, State};
@@ -52,6 +53,12 @@ async fn fill(state: State<'_, AppState>) -> Result<(), String> {
     state.request(|reply| Command::Fill { reply }).await
 }
 
+/// Longest the exit path waits for the actor to close the browser. The actor
+/// handles commands sequentially, so a mid-fill or mid-download Shutdown can
+/// only be serviced after the current command returns; without a bound, a
+/// stuck operation would make the window un-closable.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
+
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -78,7 +85,18 @@ fn main() {
                 if let Some(state) = app.try_state::<AppState>() {
                     let (reply, response) = oneshot::channel();
                     if state.inbox.blocking_send(Command::Shutdown { reply }).is_ok() {
-                        let _ = tauri::async_runtime::block_on(response);
+                        // Wait briefly for a clean browser teardown, then exit
+                        // regardless — a hung command must not pin the window
+                        // open. In that pathological case the live Chrome is
+                        // orphaned; the next launch reaps it (see Driver::launch).
+                        let expired = tauri::async_runtime::block_on(async {
+                            tokio::time::timeout(SHUTDOWN_GRACE, response).await.is_err()
+                        });
+                        if expired {
+                            tracing::warn!(
+                                "session did not shut down within {SHUTDOWN_GRACE:?}; exiting anyway"
+                            );
+                        }
                     }
                 }
             }

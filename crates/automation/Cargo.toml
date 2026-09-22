@@ -14,3 +14,7 @@ futures = "0.3"
 # needed; the `fetcher`/`rustls` features only pull in a Chrome downloader we
 # don't use (we drive the system browser).
 chromiumoxide = "0.9"
+
+# Signals for reaping orphaned automation browsers before launch (driver.rs).
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"

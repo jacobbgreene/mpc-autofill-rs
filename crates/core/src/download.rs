@@ -4,6 +4,7 @@
 //! separately via remote Drive thumbnails, so nothing here touches the grid.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use reqwest::header::{HeaderValue, CONTENT_TYPE};
 
@@ -29,10 +30,19 @@ pub struct DownloadOutcome {
     pub result: Result<PathBuf, String>,
 }
 
+/// Longest to wait just to establish a connection.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+/// Longest a single request (connect through body) may take. Full-resolution
+/// card images are a few MB, so this is generous; its job is to turn a stalled
+/// connection into a per-file error instead of hanging the download phase.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+
 /// A shared-nothing HTTP client. Cheap to hold one per download run.
 pub fn build_client() -> reqwest::Client {
     reqwest::Client::builder()
         .user_agent("mpc-autofill-rs")
+        .connect_timeout(CONNECT_TIMEOUT)
+        .timeout(REQUEST_TIMEOUT)
         .build()
         .expect("static client config is always valid")
 }
