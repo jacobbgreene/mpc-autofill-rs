@@ -1,0 +1,124 @@
+{
+  "status": "TARGETS MET",
+  "decision": "ACCEPT front-gallery append candidate",
+  "implemented": "Enable the existing back-gallery load-more observer for fronts. Retain loaded artwork and reuse decoded previews when returning to an earlier choice.",
+  "measured_bottleneck": "Explicit page-boundary waits and replacement of already viewed artwork nodes; see profile.json and profile-samples.json.",
+  "acceptance": {
+    "invariants_pass": {
+      "value": true,
+      "evidence": [
+        "validation.json",
+        "edges-results.json",
+        "comparison.json output_equivalence/request_totals/queues",
+        "sustained-results.json"
+      ]
+    },
+    "measurement_valid": {
+      "value": true,
+      "evidence": [
+        "discovery.json frozen workload and boundaries",
+        "baseline-gate.json",
+        "final-results.json: 6 alternating pairs per stratum",
+        "followup-budget.json",
+        "followup-results.json: 6 extra demanding/cold pairs",
+        "identical production Svelte/Vite settings and transport fixtures"
+      ]
+    },
+    "benefit_demonstrated": {
+      "value": true,
+      "evidence": "comparison.json: normal cold median improves 11.53%; demanding cold median improves 12.35%; both exceed 100 ms and both paired bootstrap 95% lower bounds exceed zero"
+    },
+    "guardrails_pass": {
+      "value": true,
+      "evidence": "All six strata pass every comparison.json guard; both sustained scenarios pass with no pending requests or retained gallery nodes"
+    },
+    "evidence_complete": {
+      "value": true,
+      "evidence": [
+        "starting-state.txt",
+        "toolchain.txt",
+        "hardware.txt",
+        "raw/",
+        "comparison.json",
+        "validation.json",
+        "native-smoke.json",
+        "reproduction commands below"
+      ]
+    }
+  },
+  "requirements": [
+    {
+      "requirement": "Preserve functionality, semantics, error handling, validation, security, durability, platform interfaces and unrelated changes",
+      "status": "PASS",
+      "evidence": "Small ArtworkGallery.svelte delta; output/selection equivalence on all pairs; errors, retries, direct navigation, stale responses, close, preview failures and queue drain exercised; Rust/source interfaces and storage unchanged by this candidate"
+    },
+    {
+      "requirement": "No skipped work, reduced quality, weakened tests, hardcoded results, benchmark-specific app behavior, or hidden costs",
+      "status": "PASS",
+      "evidence": "Identical fixture transport/build instrumentation for both variants; every required option viewed with decoded visible previews; mutation completion and queued work included in boundaries"
+    },
+    {
+      "requirement": "No unsafe code or unapproved product tradeoff",
+      "status": "PASS",
+      "evidence": "No unsafe code added; retaining results is the user-requested endless scrolling behavior; all frozen resource caps pass"
+    },
+    {
+      "requirement": "Discovery, baseline and profile gates precede implementation",
+      "status": "PASS",
+      "evidence": "discovery.json, baseline-gate.json, profile.json, selection.json and implementation-gate.json"
+    },
+    {
+      "requirement": "One coherent candidate with frozen thresholds; do not bundle unrelated optimizations",
+      "status": "PASS",
+      "evidence": "Only ArtworkGallery.svelte is the measured candidate. Back-editor bug repair and release packaging are separate changes and are not claimed as optimizations"
+    },
+    {
+      "requirement": "Equivalent optimized settings, representative application workloads, repeated measurements and variability",
+      "status": "PASS",
+      "evidence": "build.mjs, journey.js, measure.mjs, raw/, comparison.json sample counts/CVs/ranges/bootstrap bounds; no debug-versus-release comparison"
+    },
+    {
+      "requirement": "Verify ordering, bounded concurrency, stale-response protection, cancellation, eventual completion and sustained resource usage",
+      "status": "PASS",
+      "evidence": "10 browser edge scenarios; frontend queue tests; per-journey zero pending work; 20-cycle same-query and alternating-query lifetime checks"
+    },
+    {
+      "requirement": "Complete required correctness and native startup checks without claiming comprehensive correctness",
+      "status": "PASS",
+      "evidence": "84 Rust and 13 frontend tests pass; Svelte check/build pass; native-smoke.json; limitations are explicit below"
+    },
+    {
+      "requirement": "Keep unfavorable measured evidence and honor the bounded follow-up budget",
+      "status": "PASS",
+      "evidence": "The first six final demanding/cold pairs measured only 9.39% improvement and remain in final-results.json and raw/. Exactly six additional pairs were run and combined; thresholds were not relaxed"
+    },
+    {
+      "requirement": "Apply all acceptance booleans and stop without speculative tuning",
+      "status": "PASS",
+      "evidence": "All five booleans above are true; no second candidate was selected"
+    }
+  ],
+  "resource_tradeoffs": "Additional retained DOM and decoded thumbnails stay within frozen caps. Median renderer task CPU increases about 10% for demanding cold and 15% for demanding warm. Back-gallery medians regress 2.9% cold and 1.9% warm, within the frozen 10%/100 ms guard.",
+  "rejected_candidates": [],
+  "not_selected": "Rust/cache tuning had no measured hotspot; no speculative changes made.",
+  "should_deviations": [],
+  "commands": [
+    "nix develop --command node performance/front-gallery-2026-10-03/build.mjs /tmp/mpc-front-scroll/baseline /tmp/mpc-front-scroll/baseline-ui",
+    "nix develop --command node performance/front-gallery-2026-10-03/build.mjs . /tmp/mpc-front-scroll/candidate-ui",
+    "nix develop --command node performance/front-gallery-2026-10-03/measure.mjs baseline 6",
+    "nix develop --command node performance/front-gallery-2026-10-03/measure.mjs final 6",
+    "nix develop --command node performance/front-gallery-2026-10-03/measure.mjs followup 6",
+    "nix develop --command node performance/front-gallery-2026-10-03/measure.mjs verify",
+    "python3 performance/front-gallery-2026-10-03/analyze.py"
+  ],
+  "limitations": [
+    "Results measure production-compiled app journeys using fixed service delays and real cached JPEG fixtures in Chromium, not current live-network latency or native WebKit interaction performance.",
+    "Baseline source is the preserved 81986e5 checkout at /tmp/mpc-front-scroll/baseline; fixture JPEG paths in fixtures.json refer to the original local thumbnail cache and must be provided on another machine.",
+    "The prior interrupted partial final series was restarted as a complete alternating series; final-results.json and followup-results.json define the acceptance dataset.",
+    "Native smoke verifies startup/rendering only. No comprehensive correctness or authenticated end-to-end guarantee is inferred from passing tests."
+  ],
+  "patch_identity": {
+    "baseline_revision": "81986e54015fb88639948f94ff6ccd2be6e62adc",
+    "candidate_gallery_blob": "af7c0f294592f78256abf9abd65551233e0fe53e"
+  }
+}

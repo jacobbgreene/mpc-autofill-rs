@@ -1,0 +1,296 @@
+[
+  {
+    "workload": "normal",
+    "condition": "cold",
+    "summary": {
+      "baseline": {
+        "n": 6,
+        "median_ms": 2122.1500000003725,
+        "cv": 0.04584053726059808,
+        "min_ms": 2046.199999999255,
+        "max_ms": 2323.199999999255,
+        "frame_p95_ms": 33.39999999999998,
+        "frames_over_50": 0.008928571428571428,
+        "cpu_median_ms": 1169.508,
+        "peak_rss": 1053978624,
+        "peak_heap": 2753019
+      },
+      "candidate": {
+        "n": 6,
+        "median_ms": 1877.3999999985099,
+        "cv": 0.05418538070773003,
+        "min_ms": 1748.199999999255,
+        "max_ms": 2043.3999999985099,
+        "frame_p95_ms": 33.39999999999998,
+        "frames_over_50": 0.01391304347826087,
+        "cpu_median_ms": 1231.7440000000001,
+        "peak_rss": 1056231424,
+        "peak_heap": 2626173
+      }
+    },
+    "improvement_ms": 244.75000000186265,
+    "improvement_percent": 11.533115001381603,
+    "paired_improvement_bootstrap_95_ms": [
+      128.90000000037253,
+      427.9500000011176
+    ],
+    "primary_pass": true,
+    "guardrails": {
+      "warm_or_backs": true,
+      "frame_p95": true,
+      "long_frames": true,
+      "cpu": true,
+      "rss": true,
+      "heap": true,
+      "queues": true,
+      "dom": true,
+      "request_totals": true,
+      "output_equivalence": true
+    }
+  },
+  {
+    "workload": "normal",
+    "condition": "warm",
+    "summary": {
+      "baseline": {
+        "n": 6,
+        "median_ms": 1709.550000000745,
+        "cv": 0.020116583878221024,
+        "min_ms": 1645.199999999255,
+        "max_ms": 1743.9000000022352,
+        "frame_p95_ms": 33.29999999999973,
+        "frames_over_50": 0.010830324909747292,
+        "cpu_median_ms": 746.6525000000001,
+        "peak_rss": 928563200,
+        "peak_heap": 3908335
+      },
+      "candidate": {
+        "n": 6,
+        "median_ms": 1454.0000000018626,
+        "cv": 0.03770974714692474,
+        "min_ms": 1363.6000000014901,
+        "max_ms": 1507.2999999970198,
+        "frame_p95_ms": 33.29999999999973,
+        "frames_over_50": 0.010482180293501049,
+        "cpu_median_ms": 662.403,
+        "peak_rss": 928808960,
+        "peak_heap": 3661201
+      }
+    },
+    "improvement_ms": 255.5499999988824,
+    "improvement_percent": 14.948378228116816,
+    "paired_improvement_bootstrap_95_ms": [
+      191.10000000335276,
+      319.0
+    ],
+    "primary_pass": true,
+    "guardrails": {
+      "warm_or_backs": true,
+      "frame_p95": true,
+      "long_frames": true,
+      "cpu": true,
+      "rss": true,
+      "heap": true,
+      "queues": true,
+      "dom": true,
+      "request_totals": true,
+      "output_equivalence": true
+    }
+  },
+  {
+    "workload": "demanding",
+    "condition": "cold",
+    "summary": {
+      "baseline": {
+        "n": 12,
+        "median_ms": 9853.400000000373,
+        "cv": 0.02654861946242977,
+        "min_ms": 9281.300000000745,
+        "max_ms": 10108.5,
+        "frame_p95_ms": 33.29999999999927,
+        "frames_over_50": 0.004778788345922614,
+        "cpu_median_ms": 4867.010499999999,
+        "peak_rss": 1250254848,
+        "peak_heap": 4375306
+      },
+      "candidate": {
+        "n": 12,
+        "median_ms": 8636.050000000745,
+        "cv": 0.05152290166858012,
+        "min_ms": 7859,
+        "max_ms": 9148.800000000745,
+        "frame_p95_ms": 33.399999999999636,
+        "frames_over_50": 0.011717319663127059,
+        "cpu_median_ms": 5337.621999999999,
+        "peak_rss": 1160167424,
+        "peak_heap": 4632755
+      }
+    },
+    "improvement_ms": 1217.3499999996275,
+    "improvement_percent": 12.354618710288646,
+    "paired_improvement_bootstrap_95_ms": [
+      823.3499999996275,
+      1411.0999999996275
+    ],
+    "primary_pass": true,
+    "guardrails": {
+      "warm_or_backs": true,
+      "frame_p95": true,
+      "long_frames": true,
+      "cpu": true,
+      "rss": true,
+      "heap": true,
+      "queues": true,
+      "dom": true,
+      "request_totals": true,
+      "output_equivalence": true
+    }
+  },
+  {
+    "workload": "demanding",
+    "condition": "warm",
+    "summary": {
+      "baseline": {
+        "n": 6,
+        "median_ms": 8924.64999999851,
+        "cv": 0.02053480492691786,
+        "min_ms": 8664.800000000745,
+        "max_ms": 9155.400000002235,
+        "frame_p95_ms": 33.29999999999927,
+        "frames_over_50": 0.004417261297995243,
+        "cpu_median_ms": 4078.1635000000006,
+        "peak_rss": 1151311872,
+        "peak_heap": 3801934
+      },
+      "candidate": {
+        "n": 6,
+        "median_ms": 7740.800000000745,
+        "cv": 0.02695879010863941,
+        "min_ms": 7542.89999999851,
+        "max_ms": 8109.400000002235,
+        "frame_p95_ms": 33.399999999999636,
+        "frames_over_50": 0.01858736059479554,
+        "cpu_median_ms": 4675.791499999999,
+        "peak_rss": 1158320128,
+        "peak_heap": 6803193
+      }
+    },
+    "improvement_ms": 1183.8499999977648,
+    "improvement_percent": 13.264945964244676,
+    "paired_improvement_bootstrap_95_ms": [
+      913.9499999992549,
+      1384.0499999988824
+    ],
+    "primary_pass": true,
+    "guardrails": {
+      "warm_or_backs": true,
+      "frame_p95": true,
+      "long_frames": true,
+      "cpu": true,
+      "rss": true,
+      "heap": true,
+      "queues": true,
+      "dom": true,
+      "request_totals": true,
+      "output_equivalence": true
+    }
+  },
+  {
+    "workload": "backs",
+    "condition": "cold",
+    "summary": {
+      "baseline": {
+        "n": 6,
+        "median_ms": 1959.8499999996275,
+        "cv": 0.036578948597760445,
+        "min_ms": 1833.199999999255,
+        "max_ms": 2015.300000000745,
+        "frame_p95_ms": 33.40000000000009,
+        "frames_over_50": 0.017482517482517484,
+        "cpu_median_ms": 1337.5014999999999,
+        "peak_rss": 950542336,
+        "peak_heap": 2812094
+      },
+      "candidate": {
+        "n": 6,
+        "median_ms": 2017.550000000745,
+        "cv": 0.05737329419099582,
+        "min_ms": 1809.4000000022352,
+        "max_ms": 2099.599999997765,
+        "frame_p95_ms": 50,
+        "frames_over_50": 0.02276707530647986,
+        "cpu_median_ms": 1409.19,
+        "peak_rss": 948387840,
+        "peak_heap": 2763418
+      }
+    },
+    "improvement_ms": -57.70000000111759,
+    "improvement_percent": -2.9441028650727636,
+    "paired_improvement_bootstrap_95_ms": [
+      -214.80000000074506,
+      122.9499999973923
+    ],
+    "primary_pass": true,
+    "guardrails": {
+      "warm_or_backs": true,
+      "frame_p95": true,
+      "long_frames": true,
+      "cpu": true,
+      "rss": true,
+      "heap": true,
+      "queues": true,
+      "dom": true,
+      "request_totals": true,
+      "output_equivalence": true
+    }
+  },
+  {
+    "workload": "backs",
+    "condition": "warm",
+    "summary": {
+      "baseline": {
+        "n": 6,
+        "median_ms": 1449.5,
+        "cv": 0.032346892340246534,
+        "min_ms": 1381.1000000014901,
+        "max_ms": 1497.199999999255,
+        "frame_p95_ms": 33.19999999999982,
+        "frames_over_50": 0.006263048016701462,
+        "cpu_median_ms": 673.4639999999999,
+        "peak_rss": 950034432,
+        "peak_heap": 3625023
+      },
+      "candidate": {
+        "n": 6,
+        "median_ms": 1476.800000000745,
+        "cv": 0.034973646852195645,
+        "min_ms": 1372.1000000014901,
+        "max_ms": 1497.300000000745,
+        "frame_p95_ms": 33.29999999999973,
+        "frames_over_50": 0.008350730688935281,
+        "cpu_median_ms": 694.962,
+        "peak_rss": 952430592,
+        "peak_heap": 3629826
+      }
+    },
+    "improvement_ms": -27.300000000745058,
+    "improvement_percent": -1.88340807180028,
+    "paired_improvement_bootstrap_95_ms": [
+      -90.55000000074506,
+      69.89999999850988
+    ],
+    "primary_pass": true,
+    "guardrails": {
+      "warm_or_backs": true,
+      "frame_p95": true,
+      "long_frames": true,
+      "cpu": true,
+      "rss": true,
+      "heap": true,
+      "queues": true,
+      "dom": true,
+      "request_totals": true,
+      "output_equivalence": true
+    }
+  }
+]

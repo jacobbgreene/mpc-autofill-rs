@@ -1,0 +1,2 @@
+81986e54015fb88639948f94ff6ccd2be6e62adc
+Working tree clean before evidence directory creation.

@@ -1,0 +1,17 @@
+{
+  "cases": [
+    "count 0",
+    "count 1",
+    "25 options, node identity, absolute index and terminal sentinel",
+    "duplicate ID with preserved indices",
+    "failed append, explicit retry, single pending request and selectable old choices",
+    "stale query cannot contaminate search",
+    "close with request in flight",
+    "direct page jump, previous, next and invalid values",
+    "missing preview retry",
+    "selection semantics"
+  ],
+  "status": "PASS",
+  "pending": 0,
+  "previewWaiting": 0
+}

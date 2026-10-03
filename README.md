@@ -139,8 +139,9 @@ onto the welcome screen. Importing a file opens an artwork grid immediately;
 for pasted lists, select **Choose artwork**. Each new image starts with the first
 MPC Autofill match. Cycle through options using the arrows beside its preview or
 enter an artwork number. Click its thumbnail to inspect the current art in a
-larger preview. **Browse all artwork** opens a separate, paginated
-gallery with search and the current choice highlighted. The displayed image is
+larger preview. **Browse all artwork** opens a separate gallery that loads more
+results as you scroll, with search and the current choice highlighted. Page
+controls remain available for direct navigation. The displayed image is
 the one used in your deck. Unmatched cards can be searched by another name in
 their gallery.
 

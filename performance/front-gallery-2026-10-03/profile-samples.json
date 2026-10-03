@@ -1,0 +1,608 @@
+[
+  {
+    "function": "(idle)",
+    "url": "",
+    "line": -1,
+    "sample_ms": 1153.323
+  },
+  {
+    "function": "(program)",
+    "url": "",
+    "line": -1,
+    "sample_ms": 791.543
+  },
+  {
+    "function": "scrollTo",
+    "url": "",
+    "line": -1,
+    "sample_ms": 72.284
+  },
+  {
+    "function": "getBoundingClientRect",
+    "url": "",
+    "line": -1,
+    "sample_ms": 30.877
+  },
+  {
+    "function": "removeChild",
+    "url": "",
+    "line": -1,
+    "sample_ms": 27.73
+  },
+  {
+    "function": "showModal",
+    "url": "",
+    "line": -1,
+    "sample_ms": 27.159
+  },
+  {
+    "function": "",
+    "url": "",
+    "line": 8,
+    "sample_ms": 14.207
+  },
+  {
+    "function": "",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 13.005
+  },
+  {
+    "function": "p",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 12.124
+  },
+  {
+    "function": "(garbage collector)",
+    "url": "",
+    "line": -1,
+    "sample_ms": 11.187
+  },
+  {
+    "function": "sample",
+    "url": "",
+    "line": 11,
+    "sample_ms": 10.779
+  },
+  {
+    "function": "setAttribute",
+    "url": "",
+    "line": -1,
+    "sample_ms": 9.99
+  },
+  {
+    "function": "c",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 9.761
+  },
+  {
+    "function": "p",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 7,
+    "sample_ms": 9.661
+  },
+  {
+    "function": "fe",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 9.547
+  },
+  {
+    "function": "querySelectorAll",
+    "url": "",
+    "line": -1,
+    "sample_ms": 7.977
+  },
+  {
+    "function": "appendChild",
+    "url": "",
+    "line": -1,
+    "sample_ms": 7.377
+  },
+  {
+    "function": "requestAnimationFrame",
+    "url": "",
+    "line": -1,
+    "sample_ms": 6.324
+  },
+  {
+    "function": "Be",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 6.288
+  },
+  {
+    "function": "window.runGalleryJourney",
+    "url": "",
+    "line": 0,
+    "sample_ms": 6.009
+  },
+  {
+    "function": "createElement",
+    "url": "",
+    "line": -1,
+    "sample_ms": 5.591
+  },
+  {
+    "function": "Jn",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 5.316
+  },
+  {
+    "function": "insertBefore",
+    "url": "",
+    "line": -1,
+    "sample_ms": 5.046
+  },
+  {
+    "function": "view",
+    "url": "",
+    "line": 18,
+    "sample_ms": 4.895
+  },
+  {
+    "function": "scrollIntoView",
+    "url": "",
+    "line": -1,
+    "sample_ms": 4.49
+  },
+  {
+    "function": "focus",
+    "url": "",
+    "line": -1,
+    "sample_ms": 4.241
+  },
+  {
+    "function": "querySelector",
+    "url": "",
+    "line": -1,
+    "sample_ms": 3.87
+  },
+  {
+    "function": "ut",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 3.798
+  },
+  {
+    "function": "Mi",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 7,
+    "sample_ms": 3.356
+  },
+  {
+    "function": "xn",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 3.16
+  },
+  {
+    "function": "pe",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 3.091
+  },
+  {
+    "function": "createTextNode",
+    "url": "",
+    "line": -1,
+    "sample_ms": 2.806
+  },
+  {
+    "function": "ee",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 2.579
+  },
+  {
+    "function": "m",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 2.545
+  },
+  {
+    "function": "addEventListener",
+    "url": "",
+    "line": -1,
+    "sample_ms": 2.461
+  },
+  {
+    "function": "fr",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 2.427
+  },
+  {
+    "function": "Ce",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 2.394
+  },
+  {
+    "function": "kr",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 2.358
+  },
+  {
+    "function": "dispatchEvent",
+    "url": "",
+    "line": -1,
+    "sample_ms": 2.342
+  },
+  {
+    "function": "Ol",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 2.298
+  },
+  {
+    "function": "",
+    "url": "",
+    "line": 17,
+    "sample_ms": 2.197
+  },
+  {
+    "function": "On",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 2.183
+  },
+  {
+    "function": "",
+    "url": "",
+    "line": 0,
+    "sample_ms": 2.18
+  },
+  {
+    "function": "z",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 2.135
+  },
+  {
+    "function": "",
+    "url": "",
+    "line": -1,
+    "sample_ms": 2.115
+  },
+  {
+    "function": "click",
+    "url": "",
+    "line": -1,
+    "sample_ms": 2.032
+  },
+  {
+    "function": "M",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 2.031
+  },
+  {
+    "function": "l.$$.update",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 2.031
+  },
+  {
+    "function": "ir",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 1.868
+  },
+  {
+    "function": "x",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 7,
+    "sample_ms": 1.77
+  },
+  {
+    "function": "ke",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 1.569
+  },
+  {
+    "function": "et",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 1.519
+  },
+  {
+    "function": "",
+    "url": "",
+    "line": 28,
+    "sample_ms": 1.518
+  },
+  {
+    "function": "g",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 1.51
+  },
+  {
+    "function": "c",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 7,
+    "sample_ms": 1.443
+  },
+  {
+    "function": "il",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 1.32
+  },
+  {
+    "function": "me",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 1.307
+  },
+  {
+    "function": "f",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 7,
+    "sample_ms": 1.294
+  },
+  {
+    "function": "m",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 7,
+    "sample_ms": 1.286
+  },
+  {
+    "function": "closest",
+    "url": "",
+    "line": -1,
+    "sample_ms": 1.237
+  },
+  {
+    "function": "Z",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 7,
+    "sample_ms": 1.215
+  },
+  {
+    "function": "I",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 1.193
+  },
+  {
+    "function": "C",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 1.177
+  },
+  {
+    "function": "createElementNS",
+    "url": "",
+    "line": -1,
+    "sample_ms": 1.167
+  },
+  {
+    "function": "N",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 1.141
+  },
+  {
+    "function": "Mn",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 7,
+    "sample_ms": 1.136
+  },
+  {
+    "function": "search",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 1.126
+  },
+  {
+    "function": "Ke",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 7,
+    "sample_ms": 1.104
+  },
+  {
+    "function": "",
+    "url": "",
+    "line": 10,
+    "sample_ms": 1.094
+  },
+  {
+    "function": "d",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 1.088
+  },
+  {
+    "function": "u",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 1.084
+  },
+  {
+    "function": "Zr",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 1.08
+  },
+  {
+    "function": "vi",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 7,
+    "sample_ms": 1.064
+  },
+  {
+    "function": "getAttribute",
+    "url": "",
+    "line": -1,
+    "sample_ms": 1.058
+  },
+  {
+    "function": "Sl",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 1.042
+  },
+  {
+    "function": "dl",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 1.04
+  },
+  {
+    "function": "Ln",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 1.012
+  },
+  {
+    "function": "$n",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 1.012
+  },
+  {
+    "function": "IntersectionObserver.root",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 1.01
+  },
+  {
+    "function": "Lt",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 1.001
+  },
+  {
+    "function": "wr",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 0.982
+  },
+  {
+    "function": "mr",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 0.963
+  },
+  {
+    "function": "",
+    "url": "",
+    "line": 31,
+    "sample_ms": 0.962
+  },
+  {
+    "function": "kn",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 7,
+    "sample_ms": 0.96
+  },
+  {
+    "function": "Wr",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 0.957
+  },
+  {
+    "function": "buttons",
+    "url": "",
+    "line": 3,
+    "sample_ms": 0.953
+  },
+  {
+    "function": "ce",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 0.932
+  },
+  {
+    "function": "At",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 0.864
+  },
+  {
+    "function": "ur",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 0.856
+  },
+  {
+    "function": "$set",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 0.832
+  },
+  {
+    "function": "An",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 0.821
+  },
+  {
+    "function": "ct",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 0.813
+  },
+  {
+    "function": "Pe",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 7,
+    "sample_ms": 0.803
+  },
+  {
+    "function": "pl",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 0.779
+  },
+  {
+    "function": "d",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 7,
+    "sample_ms": 0.757
+  },
+  {
+    "function": "Te",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 0.755
+  },
+  {
+    "function": "Nl",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 0.693
+  },
+  {
+    "function": "se",
+    "url": "http://127.0.0.1:34025/baseline/assets/index-tkMco08N.js",
+    "line": 0,
+    "sample_ms": 0.642
+  },
+  {
+    "function": "toggle",
+    "url": "",
+    "line": -1,
+    "sample_ms": 0.608
+  },
+  {
+    "function": "setTimeout",
+    "url": "",
+    "line": -1,
+    "sample_ms": 0.588
+  },
+  {
+    "function": "RegExp: (\\d+)$",
+    "url": "",
+    "line": -1,
+    "sample_ms": 0.413
+  }
+]

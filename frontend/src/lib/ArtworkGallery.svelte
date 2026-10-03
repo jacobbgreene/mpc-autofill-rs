@@ -43,6 +43,7 @@
   $: locked = (busy && !loadingMore) || applying;
   $: currentId = selected?.art.drive_id ?? selectedId;
   $: pages = Math.max(1, Math.ceil((results?.count ?? 0) / ARTWORK_PAGE_SIZE));
+  $: resultLabel = kind === "cardback" ? "card backs" : "artwork";
 
   onMount(() => {
     dialog.showModal();
@@ -257,12 +258,12 @@
             ? "No matching card backs. Try another search or clear it to browse all backs."
             : "No matching artwork. Try the card’s full name or a different spelling."}
         </p>{/if}
-      {#if kind === "cardback" && results.next_page !== null}
+      {#if results.next_page !== null}
         {#key results.next_page}
           <div class="gallery-load-more" use:observeMore>
             {#if error && requested.append}
               <div class="notice error-notice" role="alert">
-                <p>Could not load more card backs: {error}</p>
+                <p>Could not load more {resultLabel}: {error}</p>
                 <button
                   class="button secondary small"
                   disabled={busy || applying}
@@ -272,13 +273,13 @@
               </div>
             {:else if loadingMore}
               <p class="gallery-status" role="status">
-                Loading more card backs…
+                Loading more {resultLabel}…
               </p>
             {:else}
               <button
                 class="button secondary small"
                 disabled={busy || applying}
-                on:click={loadMore}>Load more card backs</button
+                on:click={loadMore}>Load more {resultLabel}</button
               >
             {/if}
           </div>

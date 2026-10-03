@@ -1,0 +1,32 @@
+
+> mpc-autofill-frontend@0.1.0 test
+> node --experimental-strip-types --test tests/*.test.mjs
+
+TAP version 13
+# Subtest: tests/artwork.test.mjs
+ok 1 - tests/artwork.test.mjs
+  ---
+  duration_ms: 76.978119
+  type: 'test'
+  ...
+# Subtest: tests/order.test.mjs
+ok 2 - tests/order.test.mjs
+  ---
+  duration_ms: 71.501852
+  type: 'test'
+  ...
+# Subtest: tests/previewVisibility.test.mjs
+ok 3 - tests/previewVisibility.test.mjs
+  ---
+  duration_ms: 70.490187
+  type: 'test'
+  ...
+1..3
+# tests 3
+# suites 0
+# pass 3
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 82.259507

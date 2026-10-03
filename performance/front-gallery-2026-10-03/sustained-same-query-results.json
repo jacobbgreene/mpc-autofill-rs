@@ -1,0 +1,21 @@
+{
+  "samples": [
+    {
+      "cycle": 5,
+      "heap": 1706252,
+      "rss": 1066201088,
+      "nodes": 130,
+      "pending": 0
+    },
+    {
+      "cycle": 20,
+      "heap": 1808384,
+      "rss": 1101361152,
+      "nodes": 130,
+      "pending": 0
+    }
+  ],
+  "heapGrowth": 102132,
+  "rssGrowth": 35160064,
+  "pass": true
+}

@@ -1,0 +1,6 @@
+{
+  "reason": "The first six final pairs show an 11.53% normal cold improvement and a 9.39% demanding cold improvement; the latter is close to the frozen 10% threshold and merits the already-permitted bounded follow-up.",
+  "budget": "Exactly six additional alternating pairs for demanding cold, indices 106 through 111. No other follow-up strata and no further trials.",
+  "decision": "Combine all twelve demanding cold pairs, retaining the original six. Keep all frozen thresholds unchanged; reject the performance candidate if the combined evidence still fails any required gate.",
+  "command": "nix develop --command node performance/front-gallery-2026-10-03/measure.mjs followup 6"
+}

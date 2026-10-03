@@ -1,0 +1,30 @@
+{
+  "frontend": {
+    "command": "nix develop --command sh -c 'npm --prefix frontend run check && npm --prefix frontend test && npm --prefix frontend run build'",
+    "result": "PASS: no Svelte errors or warnings, 13 tests passed, production frontend built"
+  },
+  "rust": {
+    "command": "nix develop --command cargo test --workspace --locked",
+    "result": "PASS: 84 tests passed, 4 explicit live-service tests ignored"
+  },
+  "workflow": {
+    "command": "actionlint .github/workflows/release.yml",
+    "result": "PASS after correcting shell glob quoting"
+  },
+  "browser_edges": {
+    "command": "nix develop --command node performance/front-gallery-2026-10-03/measure.mjs verify",
+    "result": "PASS: 10 edge scenarios plus 20 cycles with alternating queries",
+    "evidence": [
+      "edges-results.json",
+      "sustained-results.json",
+      "sustained-same-query-results.json"
+    ]
+  },
+  "harness_repair": "The first edge run clicked the change-art button while its parent was still busy after loading the order. It timed out waiting for results. The test now waits for the enabled button and a UI frame before clicking; no app code changed in response.",
+  "formatting": "Workspace-wide cargo fmt --check has existing failures in untouched code. New Rust formatting was corrected. Source diffs pass git diff --check; the preserved raw baseline log and toolchain output retain their original trailing whitespace.",
+  "limitations": [
+    "Repeatable service delays and Chromium renderer measurements are not live-network or native WebKit latency measurements.",
+    "No comprehensive correctness claim is made from tests. A user reported a successful real autofill run; the exact binary used was not established.",
+    "The timed results include all selected rows, decoded visible images, final selection, and asynchronous queue drain."
+  ]
+}

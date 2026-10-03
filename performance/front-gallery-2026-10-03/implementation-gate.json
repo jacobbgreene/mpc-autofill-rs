@@ -1,0 +1,7 @@
+{
+  "gate": "IMPLEMENT",
+  "status": "PASS",
+  "patch": "Only enables the existing append sentinel for front artwork and adapts its labels. Existing bounded queue, generation, retry, deduplication, direct navigation and selected-index logic unchanged.",
+  "known_invariant_violations": [],
+  "verification_pending": true
+}

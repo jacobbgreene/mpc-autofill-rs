@@ -1,0 +1,22 @@
+{
+  "scenario": "20 open/browse/choose/close cycles alternating Island and Forest",
+  "samples": [
+    {
+      "cycle": 5,
+      "heap": 1730580,
+      "rss": 1205825536,
+      "nodes": 130,
+      "pending": 0
+    },
+    {
+      "cycle": 20,
+      "heap": 1830860,
+      "rss": 1090514944,
+      "nodes": 130,
+      "pending": 0
+    }
+  ],
+  "heapGrowth": 100280,
+  "rssGrowth": -115310592,
+  "pass": true
+}

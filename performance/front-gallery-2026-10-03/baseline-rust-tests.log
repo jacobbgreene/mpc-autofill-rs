@@ -1,0 +1,115 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.18s
+     Running unittests src/lib.rs (target/debug/deps/autofill_automation-175b54e2be1493b1)
+
+running 41 tests
+test driver::tests::absent_initial_slot_one_selects_the_single_layout ... ok
+test driver::tests::editor_state_wait_propagates_evaluation_timeout_before_deadline ... ok
+test driver::tests::destroyed_front_text_advance_is_proven_by_backs_without_replay ... ok
+test driver::tests::editor_state_wait_propagates_permanent_probe_errors ... ok
+test driver::tests::elapsed_deadline_does_not_start_an_evaluation ... ok
+test driver::tests::front_text_advance_failure_is_surfaced_without_destination_probe ... ok
+test driver::tests::protocol_context_classifiers_match_actual_chrome_errors_and_stages ... ok
+test driver::tests::same_mode_requires_both_common_back_and_single_slot_layout ... ok
+test driver::tests::editor_state_wait_recovers_from_delayed_ready_state ... ok
+test driver::tests::exact_missing_context_rejection_is_retried ... ok
+test driver::tests::retries_actual_missing_context_rejection_until_evaluation_succeeds ... ok
+test driver::tests::openable_chooser_opens_once_then_waits_through_loading ... ok
+test driver::tests::editor_state_wait_recovers_from_context_turnover_read_probes ... ok
+test driver::tests::stage_preserves_timeout_formatting ... ok
+test driver::tests::loading_chooser_does_not_reopen_before_ready ... ok
+test driver::tests::slot_wait_transitions_from_uninitialized_index_through_missing_to_ready ... ok
+test driver::tests::missing_context_starts_a_bounded_recovery ... ok
+test driver::tests::pending_evaluation_times_out_without_replay ... ok
+test driver::tests::nested_retry_budget_expires_during_sleep_without_another_attempt ... ok
+test driver::tests::timeout_destroyed_context_and_permanent_errors_are_never_replayed ... ok
+test driver::tests::ready_chooser_does_not_open ... ok
+test driver::tests::ordinary_first_evaluation_keeps_the_normal_cdp_timeout ... ok
+test driver::tests::slot_wait_context_rejections_until_deadline_keep_uninitialized_index_state ... ok
+test driver::tests::slot_wait_final_evaluation_timeout_keeps_uninitialized_index_state ... ok
+test driver::tests::absent_backs_destination_times_out_with_last_state_without_replaying_mutation ... ok
+test driver::tests::persistent_spinner_reloads_after_a_poll_sleep_crosses_the_deadline ... ok
+test js::tests::spinner_probe_queries_the_wait_marker ... ok
+test js::tests::readiness_only_requires_controls_for_the_current_stage ... ok
+test js::tests::configuration_check_rejects_invalid_or_nonminimal_quantity_brackets ... ok
+test js::tests::spinner_visibility_handles_missing_and_hidden_markers ... ok
+test js::tests::select_helpers_choose_stock_bracket_and_foil_or_report_no_fit ... ok
+test js::tests::readiness_covers_stock_bracket_and_foil_stages ... ok
+test js::tests::configuration_check_retains_nonfoil_selection_and_checks_requested_foil ... ok
+test js::tests::editor_helpers_wait_for_input_then_update_quantity_and_mode ... ok
+test js::tests::readiness_rejects_loading_or_missing_or_disabled_required_controls ... ok
+test js::tests::layout_and_slot_helpers_guard_index_and_only_mutate_ready_targets ... ok
+test js::tests::back_chooser_acquisition_is_state_aware_and_mutations_revalidate ... ok
+test js::tests::front_text_readiness_is_read_only_and_guards_advance ... ok
+test js::tests::all_public_snippets_parse_as_cdp_scripts ... ok
+test driver::tests::editor_state_timeout_after_sleep_keeps_last_state_without_another_probe ... ok
+test driver::tests::slot_wait_timeout_reports_its_last_state ... ok
+
+test result: ok. 41 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.00s
+
+     Running unittests src/lib.rs (target/debug/deps/autofill_core-a34aae5621896866)
+
+running 26 tests
+test decklist::tests::multiple_backs_for_one_front_round_trip_with_explicit_names ... ok
+test artwork_edit::tests::same_art_is_a_noop_and_invalid_or_stale_edits_never_mutate_order ... ok
+test artwork_edit::tests::selecting_art_already_used_on_same_face_merges_slots_without_duplicates ... ok
+test artwork_edit::tests::changing_common_back_preserves_custom_reverse_and_front_with_same_id ... ok
+test artwork_edit::tests::changing_front_art_preserves_copies_mixed_backs_and_print_settings ... ok
+test decklist::tests::new_cards_require_explicit_artwork_and_use_common_back ... ok
+test new_order::tests::all_double_faced_decks_need_no_common_back ... ok
+test new_order::tests::invalid_settings_and_oversized_decks_are_rejected ... ok
+test decklist::tests::repeated_new_names_share_one_artwork_choice_regardless_of_case ... ok
+test decklist::tests::unmodified_text_round_trip_preserves_every_slot_and_back ... ok
+test decklist::tests::category_detection_does_not_hide_card_names_or_artwork_suffixes ... ok
+test decklist::tests::invalid_text_never_changes_original_order ... ok
+test new_order::tests::text_import_needs_no_existing_order_and_reports_missing_artwork ... ok
+test new_order::tests::selected_common_back_does_not_replace_custom_backs ... ok
+test new_order::tests::new_order_requires_artwork_and_back_before_creation ... ok
+test order::tests::fills_uncovered_back_slots_with_the_common_cardback ... ok
+test decklist::tests::quantity_changes_and_reordering_retain_custom_backs ... ok
+test order::tests::explicit_common_back_and_fallback_slots_share_one_image ... ok
+test order::tests::merges_cards_sharing_a_drive_id ... ok
+test order::tests::parses_slot_range_syntax ... ok
+test order::tests::parses_details ... ok
+test order::tests::rejects_oversized_orders ... ok
+test decklist::tests::smaug_deck_ignores_category_headings_and_keeps_all_100_cards ... ok
+test order::tests::xml_round_trip_preserves_artwork_backs_and_escaped_names ... ok
+test image_proc::tests::leaves_low_dpi_images_byte_for_byte ... ok
+test image_proc::tests::downscales_high_dpi_images ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.72s
+
+     Running unittests src/main.rs (target/debug/deps/mpc_autofill-915fe87af9009541)
+
+running 17 tests
+test artwork::tests::live_artwork_search_returns_selectable_drive_images ... ignored, requires access to the live MPC Autofill API
+test artwork::tests::live_cardback_search_can_browse_without_a_query ... ignored, requires access to the live MPC Autofill API
+test artwork::tests::live_dpi_lookup_reads_original_smaug_artwork_resolution ... ignored, requires access to the live MPC Autofill API
+test artwork_thumbnail::tests::live_smaug_preview_downloads_and_is_reused_without_network ... ignored, requires access to the live MPC Autofill image CDN
+test artwork_thumbnail::tests::preview_cache_only_accepts_drive_ids ... ok
+test session::tests::common_back_requires_one_matching_card_covering_every_slot ... ok
+test session::tests::only_same_back_mode_collapses_to_slot_zero ... ok
+test saved_decks::tests::default_save_location_is_user_owned_and_rejects_path_traversal ... ok
+test saved_decks::tests::corrupt_index_does_not_hide_managed_decks_or_get_overwritten ... ok
+test saved_decks::tests::sorts_by_actual_save_time_and_excludes_unusable_orders ... ok
+test saved_decks::tests::missing_files_are_skipped_but_reappear_when_available_again ... ok
+test session::tests::saving_replaces_complete_xml_and_cleans_up_failed_writes ... ok
+test artwork::tests::dpi_lookup_batches_unique_ids_and_preserves_unknowns ... ok
+test saved_decks::tests::discovers_managed_and_legacy_decks_without_moving_or_recursing ... ok
+test saved_decks::tests::remembers_external_paths_across_restarts_and_refreshes_file_metadata ... ok
+test saved_decks::tests::concurrent_registration_keeps_both_save_as_paths_and_deduplicates ... ok
+test artwork_thumbnail::tests::preview_falls_back_from_http_and_decode_errors_and_deduplicates_requests ... ok
+
+test result: ok. 13 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.29s
+
+   Doc-tests autofill_automation
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests autofill_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -1,0 +1,10 @@
+{
+  "build_command": "nix build .#default --print-build-logs",
+  "binary": "/nix/store/0xmpj4gsrg6rba1lcc74m3v19d6v7aj9-mpc-autofill-0.1.0/bin/mpc-autofill",
+  "smoke_command": "nix shell nixpkgs#xorg.xwininfo --command env CHROME=/run/current-system/sw/bin/google-chrome-stable python3 scripts/smoke-linux.py result/bin/mpc-autofill",
+  "status": "PASS",
+  "result": "Packaged app stayed running, opened its main window and rendered content on a private X display.",
+  "log_directory": "/tmp/mpc-package-smoke-8u46y3ja",
+  "chrome_override": "Generated wrapper contains setenv(CHROME, bundled Chromium path, 0), which preserves a caller-supplied CHROME; startup was tested with the Google Chrome path supplied.",
+  "scope": "No autofill or user browser profile was launched by this startup test."
+}

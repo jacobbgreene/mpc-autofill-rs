@@ -1,0 +1,14 @@
+import { createRequire } from 'node:module';
+import { readFile, mkdir, writeFile } from 'node:fs/promises';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+const here=dirname(fileURLToPath(import.meta.url));
+const source=resolve(process.argv[2]);
+const output=resolve(process.argv[3]);
+const require=createRequire(source+'/frontend/package.json');
+const {build}=await import(pathToFileURL(source+'/frontend/node_modules/vite/dist/node/index.js'));
+const {svelte}=await import(pathToFileURL(source+'/frontend/node_modules/@sveltejs/vite-plugin-svelte/src/index.js'));
+const fixture=await readFile(here+'/transport.js','utf8');
+await build({root:source+'/frontend',configFile:false,base:'./',plugins:[{name:'repeatable-transport',enforce:'pre',resolveId(id){if(id.startsWith('@tauri-apps/'))return '\0repeatable-transport';},load(id){if(id==='\0repeatable-transport')return fixture;}},svelte()],build:{outDir:output,emptyOutDir:true,minify:'esbuild',sourcemap:true},logLevel:'info'});
+await mkdir(output,{recursive:true});
+await writeFile(output+'/build.json',JSON.stringify({source,output,mode:'production',minify:'esbuild',svelteDev:false,node:process.version},null,2));

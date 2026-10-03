@@ -1,0 +1,30 @@
+{
+  "scope": "Separate user-reported correctness repair, not a performance optimization candidate",
+  "failure": "review/next-review: setNextStep called readySave, which called TextEditor.reset with a null UnpickList. The site and card-back upload had already worked; the crash was in the subsequent back text editor transition.",
+  "hypothesis": "Automation advanced the newly opened back text editor before its own data was ready. The stack proves the null-list access, but cannot establish whether the missing data would have become ready with more time in that run.",
+  "evidence": {
+    "url": "https://www.makeplayingcards.com/js/pub_texteditor.js?v20260007260916",
+    "sha256": "76e408efc501b5bfd447e43fe3222b92dce918fb0a3234bf71a77e9c97c358cc",
+    "constructor": "UnpickList initially null; DesignList initially empty Array",
+    "init": "Populates UnpickList from UnpickInfo",
+    "reset": "Reads getUnpickList().length without a null check",
+    "existing_driver": "page_to_review used generic next_step, waiting only for method existence and spinner idle",
+    "public_page_probe": "Unauthenticated back page redirected to homepage; no authenticated project modified"
+  },
+  "patch": "Share read-only front/back readiness expressions, poll expected back path/layer/nonempty unpick array/design array/next button before one guarded call; preserve errors, timeout and no replay.",
+  "verification_plan": [
+    "Existing front readiness tests unchanged",
+    "New back initialized/null/empty/wrong-layer/wrong-stage tests",
+    "Delayed readiness, timeout with no save, uncertain save no-replay tests",
+    "Workspace validation and optimized native startup"
+  ],
+  "verification": {
+    "command": "nix develop --command cargo test --workspace",
+    "result": "84 passed; 0 failed; 4 live-service tests ignored",
+    "automation": "45 passed, including back text readiness with document.readyState complete and null lists, delayed readiness, timeout without advance, and no replay after uncertain mutation errors",
+    "diff_check": "git diff --check passed",
+    "format_check": "cargo fmt --all -- --check still fails on pre-existing formatting in unchanged code; formatting of the new changes was corrected",
+    "production_build": "Rebuilt and startup-tested during release preparation; see native-smoke.json."
+  },
+  "limitation": "Live authenticated end-to-end upload/review is not exercised. The readiness guard prevents the observed null-list access but does not prove delayed initialization caused the original run or that waiting alone resolves every failure."
+}

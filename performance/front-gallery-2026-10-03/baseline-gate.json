@@ -1,0 +1,263 @@
+{
+  "gate": "BASELINE",
+  "status": "PASS",
+  "summary": [
+    {
+      "workload": "backs",
+      "condition": "cold",
+      "samples": 6,
+      "median_ms": 1823.7000000011176,
+      "min_ms": 1770.1000000014901,
+      "max_ms": 1866.8999999985099,
+      "cv_percent": 2.398406532602739,
+      "pageWaitMs": 91.59999999962747,
+      "previewWaitMs": 407.0999999977648,
+      "addedChoices": 96.0,
+      "removedChoices": 72.0,
+      "pageActivations": 0.0,
+      "taskMs": 1149.5529999999999,
+      "layoutMs": 170.074,
+      "scriptMs": 49.421,
+      "peakRss": 868468736.0,
+      "peakHeap": 2594742.0,
+      "peakNodes": 726.0,
+      "requests": [
+        {
+          "cmd": "search_artwork",
+          "args": {
+            "query": "",
+            "page": 0,
+            "kind": "cardback"
+          },
+          "start": 536.6999999992549,
+          "end": 665.8999999985099
+        },
+        {
+          "cmd": "artwork_thumbnail",
+          "args": {
+            "driveId": "cardback--0"
+          },
+          "start": 751.1000000014901,
+          "end": 792.1999999992549
+        }
+      ]
+    },
+    {
+      "workload": "backs",
+      "condition": "warm",
+      "samples": 6,
+      "median_ms": 1399.8499999996275,
+      "min_ms": 1349.4000000022352,
+      "max_ms": 1502.699999999255,
+      "cv_percent": 4.4828031837762055,
+      "pageWaitMs": 101.75,
+      "previewWaitMs": 18.60000000335276,
+      "addedChoices": 96.0,
+      "removedChoices": 72.0,
+      "pageActivations": 0.0,
+      "taskMs": 511.23750000000007,
+      "layoutMs": 51.463499999999996,
+      "scriptMs": 30.244500000000006,
+      "peakRss": 875878400.0,
+      "peakHeap": 3608619.0,
+      "peakNodes": 726.0,
+      "requests": [
+        {
+          "cmd": "search_artwork",
+          "args": {
+            "query": "",
+            "page": 0,
+            "kind": "cardback"
+          },
+          "start": 2294.900000002235,
+          "end": 2421.699999999255
+        },
+        {
+          "cmd": "search_artwork",
+          "args": {
+            "query": "",
+            "page": 1,
+            "kind": "cardback"
+          },
+          "start": 2623.60000000149,
+          "end": 2744.10000000149
+        }
+      ]
+    },
+    {
+      "workload": "demanding",
+      "condition": "cold",
+      "samples": 6,
+      "median_ms": 9484.050000000745,
+      "min_ms": 9102.79999999702,
+      "max_ms": 9596.89999999851,
+      "cv_percent": 2.35364484553134,
+      "pageWaitMs": 1849.1499999947846,
+      "previewWaitMs": 1237.7500000093132,
+      "addedChoices": 336.0,
+      "removedChoices": 312.0,
+      "pageActivations": 12.0,
+      "taskMs": 4016.173,
+      "layoutMs": 370.58399999999995,
+      "scriptMs": 192.6455,
+      "peakRss": 1002268672.0,
+      "peakHeap": 3678918.0,
+      "peakNodes": 399.0,
+      "requests": [
+        {
+          "cmd": "search_artwork",
+          "args": {
+            "query": "Island",
+            "page": 0,
+            "kind": "card"
+          },
+          "start": 518.3000000007451,
+          "end": 640.6999999992549
+        },
+        {
+          "cmd": "artwork_thumbnail",
+          "args": {
+            "driveId": "card-Island-0"
+          },
+          "start": 716.3000000007451,
+          "end": 757.1000000014901
+        }
+      ]
+    },
+    {
+      "workload": "demanding",
+      "condition": "warm",
+      "samples": 6,
+      "median_ms": 8892.900000000373,
+      "min_ms": 8660.29999999702,
+      "max_ms": 9115.60000000149,
+      "cv_percent": 1.9322386947784744,
+      "pageWaitMs": 1768.0999999940395,
+      "previewWaitMs": 187.69999999180436,
+      "addedChoices": 336.0,
+      "removedChoices": 312.0,
+      "pageActivations": 12.0,
+      "taskMs": 3771.2345,
+      "layoutMs": 240.00500000000005,
+      "scriptMs": 184.7795,
+      "peakRss": 1085939712.0,
+      "peakHeap": 3690284.0,
+      "peakNodes": 399.0,
+      "requests": [
+        {
+          "cmd": "search_artwork",
+          "args": {
+            "query": "Island",
+            "page": 0,
+            "kind": "card"
+          },
+          "start": 9878.599999997765,
+          "end": 10000.39999999851
+        },
+        {
+          "cmd": "search_artwork",
+          "args": {
+            "query": "Island",
+            "page": 1,
+            "kind": "card"
+          },
+          "start": 10884.699999999255,
+          "end": 11007.79999999702
+        }
+      ]
+    },
+    {
+      "workload": "normal",
+      "condition": "cold",
+      "samples": 6,
+      "median_ms": 2072.0,
+      "min_ms": 1946.800000000745,
+      "max_ms": 2193.199999999255,
+      "cv_percent": 4.1063490955871975,
+      "pageWaitMs": 350.69999999925494,
+      "previewWaitMs": 451.4500000011176,
+      "addedChoices": 120.0,
+      "removedChoices": 96.0,
+      "pageActivations": 3.0,
+      "taskMs": 1129.1284999999998,
+      "layoutMs": 172.75600000000003,
+      "scriptMs": 53.373000000000005,
+      "peakRss": 991139840.0,
+      "peakHeap": 2525525.0,
+      "peakNodes": 399.0,
+      "requests": [
+        {
+          "cmd": "search_artwork",
+          "args": {
+            "query": "Island",
+            "page": 0,
+            "kind": "card"
+          },
+          "start": 544.5,
+          "end": 667.3999999985099
+        },
+        {
+          "cmd": "artwork_thumbnail",
+          "args": {
+            "driveId": "card-Island-0"
+          },
+          "start": 746.0999999977648,
+          "end": 785.8999999985099
+        }
+      ]
+    },
+    {
+      "workload": "normal",
+      "condition": "warm",
+      "samples": 6,
+      "median_ms": 1591.5499999988824,
+      "min_ms": 1532.4000000022352,
+      "max_ms": 1651.9000000022352,
+      "cv_percent": 2.465560497840297,
+      "pageWaitMs": 305.5,
+      "previewWaitMs": 8.950000004842877,
+      "addedChoices": 120.0,
+      "removedChoices": 96.0,
+      "pageActivations": 3.0,
+      "taskMs": 429.99699999999996,
+      "layoutMs": 52.003,
+      "scriptMs": 29.678499999999996,
+      "peakRss": 878391296.0,
+      "peakHeap": 3813901.0,
+      "peakNodes": 399.0,
+      "requests": [
+        {
+          "cmd": "search_artwork",
+          "args": {
+            "query": "Island",
+            "page": 0,
+            "kind": "card"
+          },
+          "start": 2480.5,
+          "end": 2608.39999999851
+        },
+        {
+          "cmd": "search_artwork",
+          "args": {
+            "query": "Island",
+            "page": 1,
+            "kind": "card"
+          },
+          "start": 2938.89999999851,
+          "end": 3060.5
+        }
+      ]
+    }
+  ],
+  "noise_threshold_cv_percent": 15,
+  "production_build": "baseline-build.log; baseline-ui/build.json; baseline-native resolves optimized Nix release",
+  "checks": [
+    "baseline-frontend-tests.log",
+    "baseline-frontend-check.log",
+    "baseline-rust-tests.log"
+  ],
+  "limitations": [
+    "Deterministic transport with production frontend, not live MPC or native WebKit performance",
+    "RSS summed across renderer processes of the isolated test browser; includes process overhead"
+  ]
+}

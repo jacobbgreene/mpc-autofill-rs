@@ -1,0 +1,963 @@
+{
+  "variant": "candidate",
+  "workload": "normal",
+  "condition": "cold",
+  "index": 103,
+  "profiling": false,
+  "frames": [
+    16.69999999999999,
+    16.700000000000045,
+    16.69999999999999,
+    16.5,
+    16.69999999999999,
+    16.69999999999999,
+    16.69999999999999,
+    16.600000000000023,
+    33.39999999999998,
+    16.700000000000045,
+    16.599999999999966,
+    16.600000000000023,
+    16.80000000000001,
+    16.699999999999932,
+    16.600000000000023,
+    33.30000000000007,
+    33.39999999999998,
+    16.600000000000023,
+    16.699999999999932,
+    16.600000000000023,
+    16.700000000000045,
+    16.699999999999932,
+    16.700000000000045,
+    16.5,
+    16.799999999999955,
+    16.600000000000023,
+    16.700000000000045,
+    16.699999999999932,
+    16.600000000000023,
+    16.700000000000045,
+    16.699999999999932,
+    16.600000000000023,
+    16.700000000000045,
+    16.59999999999991,
+    16.800000000000068,
+    16.600000000000023,
+    16.59999999999991,
+    16.800000000000068,
+    16.600000000000023,
+    16.699999999999932,
+    16.600000000000023,
+    16.59999999999991,
+    16.800000000000182,
+    16.699999999999818,
+    16.600000000000136,
+    16.59999999999991,
+    16.700000000000045,
+    16.700000000000045,
+    16.59999999999991,
+    16.700000000000045,
+    16.700000000000045,
+    16.700000000000045,
+    16.59999999999991,
+    16.700000000000045,
+    16.59999999999991,
+    16.700000000000045,
+    16.700000000000045,
+    16.59999999999991,
+    16.700000000000045,
+    16.700000000000045,
+    16.59999999999991,
+    16.700000000000045,
+    16.700000000000045,
+    16.59999999999991,
+    16.700000000000045,
+    16.700000000000045,
+    16.59999999999991,
+    16.700000000000045,
+    16.700000000000045,
+    16.59999999999991,
+    16.700000000000045,
+    16.700000000000045,
+    33.299999999999955,
+    33.40000000000009,
+    16.59999999999991,
+    16.700000000000045,
+    16.700000000000045,
+    16.59999999999991,
+    16.700000000000045,
+    16.700000000000045,
+    16.59999999999991,
+    16.59999999999991,
+    16.800000000000182,
+    16.59999999999991,
+    16.700000000000045,
+    16.700000000000045,
+    16.59999999999991,
+    16.700000000000045,
+    16.59999999999991,
+    16.700000000000045,
+    16.59999999999991,
+    16.800000000000182,
+    16.59999999999991,
+    50,
+    16.59999999999991,
+    16.700000000000045
+  ],
+  "longTasks": [
+    {
+      "start": 1916,
+      "duration": 51
+    }
+  ],
+  "seen": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    33,
+    34,
+    35,
+    36,
+    37,
+    38,
+    39,
+    40,
+    41,
+    42,
+    43,
+    44,
+    45,
+    46,
+    47,
+    48,
+    49,
+    50,
+    51,
+    52,
+    53,
+    54,
+    55,
+    56,
+    57,
+    58,
+    59,
+    60,
+    61,
+    62,
+    63,
+    64,
+    65,
+    66,
+    67,
+    68,
+    69,
+    70,
+    71
+  ],
+  "steps": [
+    {
+      "index": 0,
+      "start": 453.80000000074506,
+      "pageWait": 0,
+      "previewWait": 134.60000000149012,
+      "end": 629.3999999985099
+    },
+    {
+      "index": 5,
+      "start": 629.3999999985099,
+      "pageWait": 0,
+      "previewWait": 1.199999999254942,
+      "end": 684.5
+    },
+    {
+      "index": 10,
+      "start": 684.5,
+      "pageWait": 0,
+      "previewWait": 0.8000000007450581,
+      "end": 749.3000000007451
+    },
+    {
+      "index": 15,
+      "start": 749.3000000007451,
+      "pageWait": 0,
+      "previewWait": 0.19999999925494194,
+      "end": 817.8999999985099
+    },
+    {
+      "index": 20,
+      "start": 817.8999999985099,
+      "pageWait": 0,
+      "previewWait": 0.8999999985098839,
+      "end": 896.8000000007451
+    },
+    {
+      "index": 24,
+      "start": 897.5,
+      "pageWait": 0,
+      "previewWait": 133.10000000149012,
+      "end": 1066.5
+    },
+    {
+      "index": 29,
+      "start": 1066.5,
+      "pageWait": 0,
+      "previewWait": 0.8999999985098839,
+      "end": 1137.800000000745
+    },
+    {
+      "index": 34,
+      "start": 1137.800000000745,
+      "pageWait": 0,
+      "previewWait": 0.7999999970197678,
+      "end": 1201.8999999985099
+    },
+    {
+      "index": 39,
+      "start": 1201.8999999985099,
+      "pageWait": 0,
+      "previewWait": 0.7999999970197678,
+      "end": 1266.800000000745
+    },
+    {
+      "index": 44,
+      "start": 1266.800000000745,
+      "pageWait": 0,
+      "previewWait": 0.9000000022351742,
+      "end": 1333.800000000745
+    },
+    {
+      "index": 48,
+      "start": 1333.800000000745,
+      "pageWait": 93.30000000074506,
+      "previewWait": 126.59999999776483,
+      "end": 1582.8999999985099
+    },
+    {
+      "index": 53,
+      "start": 1582.8999999985099,
+      "pageWait": 0,
+      "previewWait": 1,
+      "end": 1658.199999999255
+    },
+    {
+      "index": 58,
+      "start": 1658.199999999255,
+      "pageWait": 0,
+      "previewWait": 0.6999999992549419,
+      "end": 1718.0999999977648
+    },
+    {
+      "index": 63,
+      "start": 1718.0999999977648,
+      "pageWait": 0,
+      "previewWait": 0.7999999970197678,
+      "end": 1784.199999999255
+    },
+    {
+      "index": 68,
+      "start": 1784.199999999255,
+      "pageWait": 0,
+      "previewWait": 1.1000000014901161,
+      "end": 1850.3999999985099
+    },
+    {
+      "index": 1,
+      "start": 1850.3999999985099,
+      "pageWait": 0,
+      "previewWait": 0.6000000014901161,
+      "end": 1917.5999999977648
+    }
+  ],
+  "pageWaitMs": 93.30000000074506,
+  "previewWaitMs": 404.9999999925494,
+  "pageActivations": 0,
+  "addedChoices": 96,
+  "removedChoices": 72,
+  "peakHeap": 2594548,
+  "peakNodes": 735,
+  "durationMs": 1748.199999999255,
+  "columns": 5,
+  "calls": [
+    {
+      "cmd": "search_artwork",
+      "args": {
+        "query": "Island",
+        "page": 0,
+        "kind": "card"
+      },
+      "start": 280.69999999925494,
+      "end": 406.69999999925494
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-0"
+      },
+      "start": 457.19999999925494,
+      "end": 500.0999999977648
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-1"
+      },
+      "start": 457.80000000074506,
+      "end": 503.19999999925494
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-2"
+      },
+      "start": 457.80000000074506,
+      "end": 504.5999999977648
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-3"
+      },
+      "start": 457.8999999985099,
+      "end": 505.5999999977648
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-4"
+      },
+      "start": 457.8999999985099,
+      "end": 506.19999999925494
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-5"
+      },
+      "start": 457.8999999985099,
+      "end": 509.0999999977648
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-6"
+      },
+      "start": 457.8999999985099,
+      "end": 522.1999999992549
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-7"
+      },
+      "start": 457.8999999985099,
+      "end": 524
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-8"
+      },
+      "start": 457.8999999985099,
+      "end": 545.0999999977648
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-9"
+      },
+      "start": 457.8999999985099,
+      "end": 547.3999999985099
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-10"
+      },
+      "start": 457.8999999985099,
+      "end": 574.0999999977648
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-11"
+      },
+      "start": 457.8999999985099,
+      "end": 576.3000000007451
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-12"
+      },
+      "start": 457.8999999985099,
+      "end": 577.0999999977648
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-13"
+      },
+      "start": 457.8999999985099,
+      "end": 577.8999999985099
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-14"
+      },
+      "start": 457.8999999985099,
+      "end": 601.0999999977648
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-15"
+      },
+      "start": 457.8999999985099,
+      "end": 602.5
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-16"
+      },
+      "start": 457.8999999985099,
+      "end": 604
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-17"
+      },
+      "start": 457.8999999985099,
+      "end": 604.5999999977648
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-18"
+      },
+      "start": 457.8999999985099,
+      "end": 625.1999999992549
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-19"
+      },
+      "start": 457.8999999985099,
+      "end": 638.1999999992549
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-20"
+      },
+      "start": 640.3999999985099,
+      "end": 675.5
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-21"
+      },
+      "start": 640.5,
+      "end": 677.8000000007451
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-22"
+      },
+      "start": 640.5,
+      "end": 678.5
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-23"
+      },
+      "start": 640.5,
+      "end": 679.1999999992549
+    },
+    {
+      "cmd": "search_artwork",
+      "args": {
+        "query": "Island",
+        "page": 1,
+        "kind": "card"
+      },
+      "start": 753.5999999977648,
+      "end": 874.3999999985099
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-39"
+      },
+      "start": 912.8000000007451,
+      "end": 951
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-38"
+      },
+      "start": 913.3000000007451,
+      "end": 953.3999999985099
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-37"
+      },
+      "start": 913.3000000007451,
+      "end": 954.1999999992549
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-36"
+      },
+      "start": 913.3999999985099,
+      "end": 955.3999999985099
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-35"
+      },
+      "start": 913.3999999985099,
+      "end": 956
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-34"
+      },
+      "start": 913.3999999985099,
+      "end": 956.8000000007451
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-33"
+      },
+      "start": 913.3999999985099,
+      "end": 958.1999999992549
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-32"
+      },
+      "start": 913.3999999985099,
+      "end": 959
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-31"
+      },
+      "start": 913.3999999985099,
+      "end": 991.5
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-30"
+      },
+      "start": 913.3999999985099,
+      "end": 992.8999999985099
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-29"
+      },
+      "start": 913.3999999985099,
+      "end": 993.5999999977648
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-28"
+      },
+      "start": 913.6999999992549,
+      "end": 994
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-27"
+      },
+      "start": 913.6999999992549,
+      "end": 1018.6999999992549
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-26"
+      },
+      "start": 913.6999999992549,
+      "end": 1020.1999999992549
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-25"
+      },
+      "start": 913.6999999992549,
+      "end": 1021.0999999977648
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-24"
+      },
+      "start": 913.6999999992549,
+      "end": 1021.5
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-44"
+      },
+      "start": 1069.800000000745,
+      "end": 1105.3999999985099
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-43"
+      },
+      "start": 1069.8999999985099,
+      "end": 1107.3999999985099
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-42"
+      },
+      "start": 1069.8999999985099,
+      "end": 1108
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-41"
+      },
+      "start": 1069.8999999985099,
+      "end": 1108.699999999255
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-40"
+      },
+      "start": 1070,
+      "end": 1109.699999999255
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-47"
+      },
+      "start": 1141.300000000745,
+      "end": 1176.5999999977648
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-46"
+      },
+      "start": 1141.300000000745,
+      "end": 1179.5
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-45"
+      },
+      "start": 1141.300000000745,
+      "end": 1180.199999999255
+    },
+    {
+      "cmd": "search_artwork",
+      "args": {
+        "query": "Island",
+        "page": 2,
+        "kind": "card"
+      },
+      "start": 1271.5,
+      "end": 1394.199999999255
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-59"
+      },
+      "start": 1428.199999999255,
+      "end": 1468.3999999985099
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-58"
+      },
+      "start": 1428.800000000745,
+      "end": 1471
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-57"
+      },
+      "start": 1428.800000000745,
+      "end": 1471.800000000745
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-56"
+      },
+      "start": 1428.800000000745,
+      "end": 1472.5
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-55"
+      },
+      "start": 1428.800000000745,
+      "end": 1472.5999999977648
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-54"
+      },
+      "start": 1428.800000000745,
+      "end": 1473.699999999255
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-53"
+      },
+      "start": 1428.800000000745,
+      "end": 1475.5
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-52"
+      },
+      "start": 1428.800000000745,
+      "end": 1491
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-51"
+      },
+      "start": 1428.800000000745,
+      "end": 1511.699999999255
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-50"
+      },
+      "start": 1428.800000000745,
+      "end": 1513.800000000745
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-49"
+      },
+      "start": 1428.800000000745,
+      "end": 1528.5
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-48"
+      },
+      "start": 1428.800000000745,
+      "end": 1530.3999999985099
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-64"
+      },
+      "start": 1432.800000000745,
+      "end": 1531.0999999977648
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-63"
+      },
+      "start": 1432.800000000745,
+      "end": 1531.800000000745
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-62"
+      },
+      "start": 1432.800000000745,
+      "end": 1532.3999999985099
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-61"
+      },
+      "start": 1432.800000000745,
+      "end": 1560.5
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-60"
+      },
+      "start": 1432.800000000745,
+      "end": 1578.5
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-69"
+      },
+      "start": 1595,
+      "end": 1630
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-68"
+      },
+      "start": 1595,
+      "end": 1632.199999999255
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-67"
+      },
+      "start": 1595,
+      "end": 1632.8999999985099
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-66"
+      },
+      "start": 1595,
+      "end": 1633.3999999985099
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-65"
+      },
+      "start": 1595,
+      "end": 1634
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-71"
+      },
+      "start": 1668.3999999985099,
+      "end": 1703.5999999977648
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-70"
+      },
+      "start": 1668.3999999985099,
+      "end": 1705.0999999977648
+    },
+    {
+      "cmd": "change_artwork",
+      "args": {
+        "driveId": "original",
+        "selection": {
+          "face": "front",
+          "query": "Island",
+          "drive_id": "card-Island-1",
+          "name": "Island art 1.png"
+        }
+      },
+      "start": 1919.699999999255,
+      "end": 1920.300000000745
+    },
+    {
+      "cmd": "thumbnails",
+      "args": {},
+      "start": 1924.5,
+      "end": 1924.5
+    },
+    {
+      "cmd": "artwork_thumbnail",
+      "args": {
+        "driveId": "card-Island-1"
+      },
+      "start": 1924.5,
+      "end": 1971.5999999977648
+    }
+  ],
+  "peakSearch": 1,
+  "peakPreview": 8,
+  "peakPending": 20,
+  "pending": 0,
+  "previewWaiting": 0,
+  "chosen": {
+    "driveId": "original",
+    "selection": {
+      "face": "front",
+      "query": "Island",
+      "drive_id": "card-Island-1",
+      "name": "Island art 1.png"
+    }
+  },
+  "finalName": "Island art 1",
+  "peakRss": 939958272,
+  "taskMs": 997.17,
+  "layoutMs": 110.295,
+  "scriptMs": 53.622
+}

@@ -1,0 +1,103 @@
+{
+  "gate": "DISCOVER",
+  "status": "PASS",
+  "starting_revision": "81986e54015fb88639948f94ff6ccd2be6e62adc",
+  "starting_modifications": "",
+  "instructions": "No applicable AGENTS.md found in repository or ancestors; README validation commands apply.",
+  "execution_model": "Svelte/Vite UI in Tauri; session actor serializes order mutations; independent async artwork search/thumbnail commands. Existing shared search queue concurrency=4, Rust thumbnail semaphore=8. Front gallery replaces 24 choices per page; back gallery appends; previews observed within 600px; append sentinel within 300px.",
+  "release": "Nix package release Rust thin LTO, codegen-units=1, stripped, tauri/custom-protocol. UI measurements use actual full App.svelte compiled by production Vite with an identical deterministic Tauri transport fixture for both revisions; not a native WebKit or live-network benchmark.",
+  "invariants": [
+    "Identical artwork IDs, names, ordering, DPI, selected query and absolute index; identical selected order output and slot assignments.",
+    "All requested result pages and visible image previews complete inside the measured journey; no dropped failures, quality reduction, or measurement-specific application paths.",
+    "Retain text search, current-art indication, direct page jumps, previous/next navigation, enlarged previews, retry, Escape, apply locks, stale-response protection, and card-back infinite scrolling.",
+    "No changes to Rust validation, disk writes, security policy, dependency versions, image processing, or supported native platform interfaces.",
+    "One append search in flight; shared search maximum4 and thumbnail maximum8; queued work drains on completion/close."
+  ],
+  "workloads": [
+    {
+      "id": "normal",
+      "kind": "card",
+      "options": 72,
+      "conditions": [
+        "cold",
+        "warm"
+      ],
+      "input": "single-card saved deck; 3 pages of distinct art with real cached JPEG fixtures, 120ms search and 35ms bounded preview transport; 1100x820 viewport; browser CPU throttle=4",
+      "required": "visit every row of all 72 options with visible previews decoded, revisit first row, choose option2, verify resulting order and all async work drained"
+    },
+    {
+      "id": "demanding",
+      "kind": "card",
+      "options": 288,
+      "conditions": [
+        "cold",
+        "warm"
+      ],
+      "input": "same deck/transport, 12 pages; 720x560 viewport; throttle=4",
+      "required": "visit every row of all 288 options, revisit first row, choose option2; no missing/duplicate IDs; all async work drained"
+    },
+    {
+      "id": "backs",
+      "kind": "cardback",
+      "options": 72,
+      "conditions": [
+        "cold",
+        "warm"
+      ],
+      "input": "same deck with common back, 1100x820, throttle=4",
+      "required": "same complete journey; existing infinite scrolling and back-only replacement retained"
+    },
+    {
+      "id": "edges",
+      "options": [
+        0,
+        1,
+        25,
+        49
+      ],
+      "conditions": [
+        "empty",
+        "single",
+        "duplicate ID",
+        "failed append/retry",
+        "stale search",
+        "close during request",
+        "selected art on page2",
+        "manual jump",
+        "applying edit",
+        "missing thumbnail/retry"
+      ],
+      "required": "correct error recovery, original indices, selected highlight, no cross-query contamination or mutation on cancel"
+    },
+    {
+      "id": "sustained",
+      "kind": "card",
+      "options": 72,
+      "cycles": 20,
+      "conditions": [
+        "same IDs and alternating two queries"
+      ],
+      "required": "complete every cycle and drain requests; close/reopen galleries; force GC at cycle5 and20 for leak comparison"
+    }
+  ],
+  "boundaries": {
+    "start": "Immediately before opening the gallery; cold and warm setup recorded separately.",
+    "end": "Every specified row has been viewed with decoded thumbnails, first row revisited, option2 applied and gallery closed, and fixture search/thumbnail/mutation queues all idle.",
+    "primary": "Wall-clock milliseconds for the complete browse-and-select journey.",
+    "secondary": "Cumulative page-boundary waits, renderer task CPU time, request counts, image decode completion, frame p95/max/>50ms, peak JS heap and renderer RSS, peak pending requests, result/selection snapshots."
+  },
+  "frozen_acceptance": {
+    "primary": "Normal AND demanding cold journey medians improve >=10% AND >=100ms; paired median improvement exceeds 95% bootstrap uncertainty (lower bound >0).",
+    "warm": "Neither normal nor demanding warm median regresses by more than max(10%,100ms).",
+    "backs": "Cold/warm median regression <=max(10%,100ms).",
+    "noise": "Each baseline stratum CV<=15%; otherwise one predeclared follow-up of 6 additional paired trials; still inconclusive => reject.",
+    "samples": "6 measured baseline trials per normal/demanding/backs x cold/warm before editing; final6 alternating pairs per stratum in AB/BA order. At most6 extra pairs/stratum if inconclusive.",
+    "frames": "Candidate p95 frame time <=max(baseline p95*1.25,50ms); fraction of >50ms frames <=baseline+5 percentage points.",
+    "resources": "Peak renderer RSS <=baseline+160MiB and JS heap <=baseline+32MiB for <=288 real640px previews; CPU task time <=max(baseline*1.25,baseline+100ms). DOM <=loaded choices*16+500.",
+    "queues": "Peak search active<=4, append<=1, preview active<=8; pending=0 at each end. Request totals no greater than baseline for required pages/images.",
+    "sustained": "After GC, cycle20 JS heap <=cycle5+8MiB and renderer RSS <=cycle5+64MiB; no pending work, no growth in live gallery DOM after close.",
+    "correctness": "All existing frontend tests/checks, workspace Rust tests (network checks explicitly excluded), representative output/side-effect assertions, new browser edges, and native optimized startup smoke check pass."
+  },
+  "scope_and_stop": "One coherent front-gallery append candidate; no unrelated tuning. Stop if targets met. If rejected, preserve only evidence and revert candidate app changes. Resource growth within explicit caps is the measured cost of the user-requested retained scrolling results; no eviction/quality tradeoff is authorized.",
+  "measurement_budget": "Initial6 trials/stratum; final6 alternating pairs/stratum; optional one6-pair follow-up only. No wall-clock timeout beyond external failure; no speculative second optimization without re-profile."
+}

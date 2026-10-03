@@ -1,0 +1,11 @@
+
+> mpc-autofill-frontend@0.1.0 check
+> svelte-check --tsconfig ./tsconfig.json
+
+
+====================================
+Loading svelte-check in workspace: /home/jbgreene/Documents/mpc-autofill-rs/frontend
+Getting Svelte diagnostics...
+
+====================================
+svelte-check found 0 errors and 0 warnings

@@ -1,0 +1,36 @@
+{
+  "gate": "SELECT",
+  "status": "PASS",
+  "hypothesis": {
+    "rank": 1,
+    "name": "Append front-artwork pages near the viewport using the existing back-gallery loading mechanism",
+    "classification": [
+      "I/O scheduling",
+      "rendering"
+    ],
+    "measured_problem": "Normal/demanding cold journeys spend median351/1849ms waiting at page boundaries and require3/12 explicit page activations including return. Front page replacement removes96/312 choice nodes per journey. CPU samples include removeChild27.7ms; no attribution of native program time to a specific function is claimed. Back append journey waits92ms across the same72 choices.",
+    "mechanism": "Retain already loaded front choices and decoded thumbnails; fetch the next page when approaching the bottom, overlapping bounded I/O with required viewing. Returning to an earlier image uses retained DOM.",
+    "prediction": "At least10% and100ms reduction for normal/demanding cold journeys with no extra required-page or image requests.",
+    "risks": [
+      "More live DOM and decoded image memory",
+      "Stale queries or duplicate results while appending",
+      "Front selected-page and direct-navigation regressions"
+    ],
+    "effort": "One Svelte component, browser edge coverage, paired production-compiled measurements and native smoke",
+    "eligible": true
+  },
+  "thresholds": "discovery.json frozen_acceptance, unchanged",
+  "affected_workloads": [
+    "normal",
+    "demanding",
+    "backs",
+    "edges",
+    "sustained"
+  ],
+  "rollback_boundary": [
+    "frontend/src/lib/ArtworkGallery.svelte",
+    "README.md artwork-gallery explanation only"
+  ],
+  "separate_bugfix": "User subsequently reported review/next-review null list failure. Any automation repair will be recorded separately and is not part of this performance candidate or its measurements.",
+  "instrumentation": "Same build.mjs, transport.js, journey.js and measure.mjs for both revisions."
+}
