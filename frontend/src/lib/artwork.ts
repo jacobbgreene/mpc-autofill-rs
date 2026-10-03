@@ -1,5 +1,28 @@
 export const ARTWORK_PAGE_SIZE = 24;
 
+// Artwork IDs identify the original image, independent of deck or card face.
+// Reuse DPI from searches so choosing artwork never needs another lookup.
+const dpiCache = new Map<string, number | null>();
+
+export function cachedArtworkDpi(id: string): number | null | undefined {
+  return dpiCache.get(id);
+}
+
+export function rememberArtworkDpi(values: Record<string, number | null>) {
+  for (const [id, dpi] of Object.entries(values)) {
+    const value = dpi !== null && Number.isFinite(dpi) && dpi > 0 ? dpi : null;
+    if (value !== null || !dpiCache.has(id)) dpiCache.set(id, value);
+  }
+}
+
+export function dpiLabel(dpi: number | null | undefined): string {
+  return dpi === undefined
+    ? "Loading DPI…"
+    : dpi !== null && dpi > 0
+      ? `${dpi} DPI`
+      : "DPI unavailable";
+}
+
 export type Artwork = {
   drive_id: string;
   name: string;
@@ -73,7 +96,14 @@ export function createArtworkSearch(load: ArtworkSearch, concurrency = 4) {
           running++;
           Promise.resolve()
             .then(() => load(query, page, kind))
-            .then(resolve, reject)
+            .then((results) => {
+              rememberArtworkDpi(
+                Object.fromEntries(
+                  results.cards.map((art) => [art.drive_id, art.dpi]),
+                ),
+              );
+              resolve(results);
+            }, reject)
             .finally(() => {
               running--;
               pump();

@@ -14,6 +14,11 @@
   import SavedDecks from "./lib/SavedDecks.svelte";
   import ChangeArtwork from "./lib/ChangeArtwork.svelte";
   import {
+    cachedArtworkDpi,
+    rememberArtworkDpi,
+    dpiLabel,
+  } from "./lib/artwork";
+  import {
     cardKey,
     displayName,
     filterCards,
@@ -36,6 +41,8 @@
   let error = "";
   let orderError = "";
   let previewError = "";
+  let dpiError = "";
+  let dpiGeneration = 0;
   let libraryWarning = "";
   let dragging = false;
   let query = "";
@@ -196,6 +203,7 @@
     void connect();
     return () => {
       disposed = true;
+      dpiGeneration++;
       toolbarSize.disconnect();
       unlisteners.forEach((off) => off());
       if (frame !== null) cancelAnimationFrame(frame);
@@ -223,6 +231,7 @@
       pending = [];
       summary = loaded;
       cards = loaded.cards.map((card) => ({ ...card, status: "pending" }));
+      void loadDpi();
       phase = "";
       error = "";
       previewError = "";
@@ -398,6 +407,39 @@
     window.scrollTo({ top: 0 });
   }
 
+  async function loadDpi() {
+    const generation = ++dpiGeneration;
+    dpiError = "";
+    cards = cards.map((card) => ({
+      ...card,
+      dpi: cachedArtworkDpi(card.drive_id),
+    }));
+    const ids = [
+      ...new Set(
+        cards
+          .filter((card) => card.dpi === undefined)
+          .map((card) => card.drive_id),
+      ),
+    ];
+    if (!ids.length) return;
+    try {
+      const values = await invoke<Record<string, number | null>>(
+        "artwork_dpi",
+        { driveIds: ids },
+      );
+      rememberArtworkDpi(values);
+      if (generation !== dpiGeneration) return;
+      cards = cards.map((card) => ({
+        ...card,
+        dpi: cachedArtworkDpi(card.drive_id) ?? null,
+      }));
+    } catch {
+      if (generation !== dpiGeneration) return;
+      cards = cards.map((card) => ({ ...card, dpi: card.dpi ?? null }));
+      dpiError = "Some artwork DPI values could not be loaded.";
+    }
+  }
+
   function changeArtwork(card: Card) {
     if (busy || !connected) return;
     selectedKey = null;
@@ -433,6 +475,7 @@
       thumb: thumbnails.get(card.drive_id),
       status: "pending",
     }));
+    void loadDpi();
     phase = "";
     error = "";
     orderError = "";
@@ -658,6 +701,11 @@
                     ? ""
                     : "s"}</span
                 >
+                <span
+                  class="card-dpi"
+                  title="Original artwork resolution reported by MPC Autofill"
+                  >{dpiLabel(card.dpi)}</span
+                >
                 {#if needsAttention(card)}<span
                     class="common-back-warning"
                     title={card.error}
@@ -709,6 +757,12 @@
           <p>{error}</p>
         </details>{/if}
       {#if previewError}<p class="notice">{previewError}</p>{/if}
+      {#if dpiError}<div class="notice" role="status">
+          <p>{dpiError}</p>
+          <button class="text-button" on:click={() => loadDpi()}
+            >Retry DPI</button
+          >
+        </div>{/if}
 
       <section class="library" aria-labelledby="library-title">
         <div class="library-heading">

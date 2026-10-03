@@ -3,10 +3,39 @@ import assert from "node:assert/strict";
 import {
   createArtworkSearch,
   createArtworkPreview,
+  cachedArtworkDpi,
+  rememberArtworkDpi,
+  dpiLabel,
 } from "../src/lib/artwork.ts";
 
 const result = { cards: [], count: 0, next_page: null };
 const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+test("DPI follows the artwork ID across selection and reopening, with unknown values explicit", async () => {
+  const client = createArtworkSearch(async () => ({
+    cards: [
+      { drive_id: "dpi-original", dpi: 1200 },
+      { drive_id: "dpi-alternate", dpi: 600 },
+    ],
+    count: 2,
+    next_page: null,
+  }));
+  await client.search("Island", 0);
+  client.dispose();
+  assert.equal(cachedArtworkDpi("dpi-original"), 1200);
+  assert.equal(cachedArtworkDpi("dpi-alternate"), 600);
+  rememberArtworkDpi({ "dpi-alternate": null });
+  assert.equal(
+    cachedArtworkDpi("dpi-alternate"),
+    600,
+    "a missing lookup cannot erase known artwork metadata",
+  );
+  assert.equal(dpiLabel(cachedArtworkDpi("not-looked-up")), "Loading DPI…");
+  rememberArtworkDpi({ "dpi-legacy": 800, "dpi-missing": null, "dpi-zero": 0 });
+  assert.equal(dpiLabel(cachedArtworkDpi("dpi-legacy")), "800 DPI");
+  assert.equal(dpiLabel(cachedArtworkDpi("dpi-missing")), "DPI unavailable");
+  assert.equal(dpiLabel(cachedArtworkDpi("dpi-zero")), "DPI unavailable");
+});
 
 test("tiles and galleries share local previews; failed previews remain retryable", async () => {
   let calls = 0;

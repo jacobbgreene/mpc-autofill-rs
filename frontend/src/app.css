@@ -965,11 +965,11 @@ summary {
 .card-slot {
   position: relative;
   min-width: 0;
-  /* Reserve artwork, two-line name, status, and the separate artwork button.
+  /* Reserve artwork, two-line name, DPI, status, and the separate artwork button.
      Off-screen rendering must not change the grid's height while scrolling. */
   aspect-ratio: 5 / 7;
   box-sizing: content-box;
-  padding-bottom: 106px;
+  padding-bottom: 124px;
 }
 .card-change-art {
   position: absolute;
@@ -1100,6 +1100,17 @@ summary {
   margin-top: 10px;
   overflow-wrap: anywhere;
   min-height: 36px;
+}
+.card-dpi {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  line-height: 15px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.common-back-info .card-dpi {
+  margin: 0;
 }
 .card-status {
   display: flex;

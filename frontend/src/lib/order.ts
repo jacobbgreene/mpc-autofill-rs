@@ -16,6 +16,7 @@ export type Card = {
   slots: number[];
   cardback: boolean;
   thumb?: string;
+  dpi?: number | null;
   status: Status;
   error?: string;
 };

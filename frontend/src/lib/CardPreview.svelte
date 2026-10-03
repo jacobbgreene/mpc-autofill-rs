@@ -3,6 +3,7 @@
   import Icon from "./Icon.svelte";
   import ArtworkThumbnail from "./ArtworkThumbnail.svelte";
   import type { Artwork } from "./artwork";
+  import { dpiLabel } from "./artwork";
   import { displayName, statusLabels, type Card } from "./order";
   export let card: Card | null = null;
   export let artwork: Artwork | null = null;
@@ -87,6 +88,7 @@
           >{card.cardback ? "Common cardback" : `${card.face} image`}</span
         >
         <h2 id="preview-title">{displayName(card)}</h2>
+        <p class="preview-dpi">Source artwork · {dpiLabel(card.dpi)}</p>
         <p class="card-status {card.status}">{statusLabels[card.status]}</p>
         <p>
           Used in {card.slots.length} card slot{card.slots.length === 1

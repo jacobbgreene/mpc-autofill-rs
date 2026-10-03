@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
   import Icon from "./Icon.svelte";
+  import { dpiLabel } from "./artwork";
   import {
     displayName,
     cardKey,
@@ -50,6 +51,11 @@
       >
     </span>
     <span class="card-name" title={displayName(card)}>{displayName(card)}</span>
+    <span
+      class="card-dpi"
+      title="Original artwork resolution reported by MPC Autofill"
+      >{dpiLabel(card.dpi)}</span
+    >
     <span class="card-status {card.status}">
       <Icon
         name={needsAttention(card)

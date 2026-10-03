@@ -100,6 +100,9 @@ asks where to write its XML order; the imported text file stays unchanged. The
 
 Open or drop an order XML to browse its cards. Search by name, show all cards,
 backs, or images needing attention, and click a card for a larger preview.
+The grid, enlarged preview, and common-back widget show the original artwork's
+DPI from MPC Autofill. Existing XML orders load this metadata in the background;
+missing values show **DPI unavailable**, and failed lookups offer **Retry DPI**.
 Use **Change artwork** below any image (or in its enlarged preview) to choose a
 replacement from MPC Autofill. The common-back widget beside **Start autofill**
 offers a larger preview and **Change back**, keeping the regular grid focused on
