@@ -43,6 +43,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: '. -> target'
+          cache-on-failure: true
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -59,7 +60,8 @@ jobs:
       - name: Install Tauri CLI
         run: npm install --global @tauri-apps/cli@2.11.4
       - name: Build installers
-        run: tauri build --bundles ${{ matrix.bundles }} -- --locked
+        shell: bash
+        run: tauri build --verbose --bundles ${{ matrix.bundles }} -- --locked
       - name: Smoke test Linux package
         if: runner.os == 'Linux'
         run: |

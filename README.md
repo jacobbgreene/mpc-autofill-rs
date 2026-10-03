@@ -58,7 +58,9 @@ checksums. Review the assets and publish the draft to share it. A manual workflo
 run on a branch builds downloadable workflow artifacts without creating a release.
 
 To reproduce packaging on a machine with
-[Tauri's prerequisites](https://v2.tauri.app/start/prerequisites/) installed:
+[Tauri's prerequisites](https://v2.tauri.app/start/prerequisites/) installed,
+run these commands in Bash (Git Bash on Windows, so the npm launcher preserves
+the `-- --locked` arguments):
 
 ```sh
 npm --prefix frontend ci
