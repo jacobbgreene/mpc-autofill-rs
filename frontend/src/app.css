@@ -28,26 +28,24 @@
   --warning-soft: #fff7e9;
   --shadow: 0 4px 16px #24243008;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    color: #ececf3;
-    background: #16171c;
-    --bg: #16171c;
-    --panel: #1e1f26;
-    --surface: #282932;
-    --text: #ececf3;
-    --muted: #a5a5b7;
-    --border: #33343f;
-    --accent: #ac9cff;
-    --accent-hover: #c3b7ff;
-    --accent-soft: #302b46;
-    --ok: #77cfa9;
-    --fail: #ff9995;
-    --warning: #eac080;
-    --warning-soft: #332d23;
-    --shadow: 0 4px 16px #00000012;
-  }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  color: #ececf3;
+  background: #16171c;
+  --bg: #16171c;
+  --panel: #1e1f26;
+  --surface: #282932;
+  --text: #ececf3;
+  --muted: #a5a5b7;
+  --border: #33343f;
+  --accent: #ac9cff;
+  --accent-hover: #c3b7ff;
+  --accent-soft: #302b46;
+  --ok: #77cfa9;
+  --fail: #ff9995;
+  --warning: #eac080;
+  --warning-soft: #332d23;
+  --shadow: 0 4px 16px #00000012;
 }
 * {
   box-sizing: border-box;
@@ -1855,4 +1853,59 @@ textarea:focus-visible {
 }
 .chosen-back-preview .artwork-placeholder > span {
   display: none;
+}
+
+.theme-picker {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--muted);
+}
+.theme-picker select {
+  background: var(--panel);
+  color: var(--text);
+  border: 0;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 3px 0;
+}
+.theme-picker select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.artwork-card-preview {
+  cursor: zoom-in;
+}
+.card-dialog.artwork-detail {
+  width: min(940px, calc(100vw - 40px));
+}
+.card-dialog.artwork-detail[open] {
+  grid-template-columns: minmax(0, 1.6fr) minmax(200px, 1fr);
+}
+@media (max-width: 900px) {
+  .app-bar {
+    gap: 12px;
+  }
+  .file-actions {
+    gap: 6px;
+  }
+  .file-actions .button {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+}
+@media (max-width: 600px) {
+  .card-dialog.artwork-detail[open] {
+    grid-template-columns: 1fr;
+  }
+  .card-dialog.artwork-detail .preview-art {
+    max-height: 65vh;
+  }
 }

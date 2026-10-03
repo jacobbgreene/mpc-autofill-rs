@@ -10,6 +10,7 @@
   import CardPreview from "./lib/CardPreview.svelte";
   import ProgressPanel from "./lib/ProgressPanel.svelte";
   import DeckEditor from "./lib/DeckEditor.svelte";
+  import ThemePicker from "./lib/ThemePicker.svelte";
   import {
     cardKey,
     displayName,
@@ -403,6 +404,7 @@
           ><Icon name="folder" size={16} />Open order</button
         >
       </div>{/if}
+    <ThemePicker />
   </header>
 
   <main class:welcome-main={!summary}>

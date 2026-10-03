@@ -3,6 +3,7 @@
   import Icon from "./Icon.svelte";
   import ArtworkGallery from "./ArtworkGallery.svelte";
   import ArtworkThumbnail from "./ArtworkThumbnail.svelte";
+  import CardPreview from "./CardPreview.svelte";
   import {
     ARTWORK_PAGE_SIZE,
     type ArtworkSearch,
@@ -25,6 +26,7 @@
   let busy = !initial;
   let error = "";
   let gallery = false;
+  let previewOpen = false;
   let generation = 0;
   let previewFailed = false;
   let previewRetry = 0;
@@ -104,9 +106,10 @@
     >
     <button
       class="artwork-card-preview"
-      aria-label={`Browse all artwork for ${name} (${face})`}
-      disabled={busy || disabled}
-      on:click={() => (gallery = true)}
+      aria-label={`Preview artwork for ${name} (${face})`}
+      title="Preview artwork"
+      disabled={busy || disabled || !selected}
+      on:click={() => (previewOpen = true)}
     >
       {#if selected}{#key selected.art.drive_id}<ArtworkThumbnail
             driveId={selected.art.drive_id}
@@ -117,11 +120,7 @@
           />{/key}
       {:else}<span class="artwork-placeholder"
           ><Icon name="image" size={30} /><span
-            >{busy
-              ? "Finding artwork…"
-              : selected
-                ? "Preview unavailable"
-                : "Find artwork"}</span
+            >{busy ? "Finding artwork…" : "Find artwork"}</span
           ></span
         >{/if}
     </button>
@@ -183,6 +182,10 @@
     >
   </div>
 </article>
+{#if previewOpen && selected}<CardPreview
+    artwork={selected.art}
+    on:close={() => (previewOpen = false)}
+  />{/if}
 {#if gallery}<ArtworkGallery
     {search}
     title={name}

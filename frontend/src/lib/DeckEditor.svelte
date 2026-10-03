@@ -39,7 +39,8 @@
   let grid: HTMLDivElement;
   let text = initialText;
   let originalText = initialText;
-  let orderName = initialName;
+  let orderName = "";
+  $: effectiveName = orderName.trim() || initialName.trim() || "New deck";
   let stock = "S30";
   let foil = false;
   let commonBack: ArtworkChoice | null = null;
@@ -97,8 +98,7 @@
       (text !== originalText ||
         selections.length > 0 ||
         commonBack ||
-        (mode === "create" &&
-          (orderName !== initialName || stock !== "S30" || foil))) &&
+        (mode === "create" && (orderName.trim() || stock !== "S30" || foil))) &&
       !(await confirm(
         "Discard this draft decklist? Your current order will stay unchanged.",
         { title: "Discard draft", kind: "warning" },
@@ -169,7 +169,7 @@
   }
   function newOrderOptions() {
     return {
-      name: orderName,
+      name: effectiveName,
       stock,
       foil,
       cardback: commonBack
@@ -301,13 +301,14 @@
       <details class="deck-print-settings" open={!preview}>
         <summary
           >Print settings <span
-            >{orderName} · {stock}{foil ? " · Foil" : ""}</span
+            >{effectiveName} · {stock}{foil ? " · Foil" : ""}</span
           ></summary
         >
         <div class="new-order-settings">
           <label class="order-name-field"
-            >Order name<input
+            >Deck name<input
               bind:value={orderName}
+              placeholder={initialName.trim() || "New deck"}
               maxlength="200"
               disabled={busy}
             /></label
@@ -414,11 +415,7 @@
     >
     {#if preview}<button
         class="button primary"
-        disabled={busy ||
-          !!loading.size ||
-          !!remaining.length ||
-          needsBack ||
-          (mode === "create" && !orderName.trim())}
+        disabled={busy || !!loading.size || !!remaining.length || needsBack}
         on:click={apply}
         >{busy
           ? "Applying…"

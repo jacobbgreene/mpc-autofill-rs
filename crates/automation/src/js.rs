@@ -260,12 +260,6 @@ pub fn slot_state(slot: u32) -> String {
     )
 }
 
-/// Does the editor currently have a slot element for `slot`? Retained callers
-/// receive a guarded boolean, while broken editor methods still propagate.
-pub fn slot_exists(slot: u32) -> String {
-    format!("({}==='ready')", slot_state(slot))
-}
-
 /// The PID currently occupying `slot`, or an empty string when its actual
 /// target has no PID. Missing or uninitialized slots are prerequisites, not
 /// empty targets, and therefore fail descriptively.
@@ -364,7 +358,6 @@ mod tests {
             select_smallest_bracket("quantity", 54),
             INITIAL_LAYOUT_HAS_SLOT_ONE.to_owned(),
             slot_state(1),
-            slot_exists(1),
             pid_in_slot(1),
             insert_into_slot(1, "pid-1"),
         ];
@@ -760,7 +753,6 @@ mod tests {
             evaluate(&slot_state(7), source_faithful),
             "uninitialized-index"
         );
-        assert_eq!(evaluate(&slot_exists(7), source_faithful), "false");
 
         let empty_map = source_faithful.replace("IndexObj:null", "IndexObj:{}");
         assert_eq!(evaluate(&slot_state(7), &empty_map), "missing-slot");

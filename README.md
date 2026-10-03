@@ -58,7 +58,8 @@ Start with **Import .txt decklist**, **Paste a decklist**, or drop a `.txt` file
 onto the welcome screen. Importing a file opens an artwork grid immediately;
 for pasted lists, select **Choose artwork**. Each new image starts with the first
 MPC Autofill match. Cycle through options using the arrows beside its preview or
-enter an artwork number. **Browse all artwork** opens a separate, paginated
+enter an artwork number. Click its thumbnail to inspect the current art in a
+larger preview. **Browse all artwork** opens a separate, paginated
 gallery with search and the current choice highlighted. The displayed image is
 the one used in your deck. Unmatched cards can be searched by another name in
 their gallery.
@@ -70,8 +71,13 @@ Google Drive. If a preview cannot load, use **Retry preview** on the card or
 Expand **Print settings** to choose a name, cardstock and finish, and browse the
 cardback gallery for a common reverse. **Edit decklist** returns to the text;
 artwork choices for matching names are retained when you change quantities.
+The suggested deck name is a placeholder that disappears as you type. Leave it
+empty to use the imported filename (or **New deck** for a pasted list).
 Explicit double-faced pairs keep their own backs. A common back is only required
 for cards without an explicit reverse.
+
+The appearance selector in the top bar offers **Light**, **Dark**, and **System**.
+Your choice is remembered between sessions; **System** follows your device theme.
 
 **Create deck** opens the completed draft in the card library. The first **Save**
 asks where to write its XML order; the imported text file stays unchanged. The
