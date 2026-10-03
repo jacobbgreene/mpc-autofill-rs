@@ -311,7 +311,8 @@ mod tests {
         let old = listing.decks.iter().find(|d| d.name == "Old deck").unwrap();
         assert_eq!(old.quantity, 3);
         assert_eq!(old.preview_id.as_deref(), Some("front-art"));
-        assert_eq!(old.path, legacy.to_string_lossy());
+        // Windows canonical paths expand short names and use an extended prefix.
+        assert_eq!(old.path, legacy.canonicalize().unwrap().to_string_lossy());
         // One-time discovery never expands to later unrelated Documents files.
         fixture.deck("Documents/not-imported-later.xml");
         assert_eq!(fixture.library().list().await.unwrap().decks.len(), 2);

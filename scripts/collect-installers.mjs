@@ -10,6 +10,8 @@ for (const [bundle, extension] of bundles) {
   const directory = join('target', 'release', 'bundle', bundle);
   const files = readdirSync(directory).filter(name => name.endsWith(extension));
   assert.equal(files.length, 1, `Expected exactly one ${bundle} installer`);
-  copyFileSync(join(directory, files[0]), join('dist', files[0]));
-  console.log(`Installer: ${files[0]}`);
+  // GitHub rewrites spaces during upload; name files before computing checksums.
+  const filename = files[0].replaceAll(' ', '-');
+  copyFileSync(join(directory, files[0]), join('dist', filename));
+  console.log(`Installer: ${filename}`);
 }
