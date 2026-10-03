@@ -322,7 +322,13 @@ impl Driver {
 
     pub async fn page_to_review(&self) -> Result<()> {
         self.next_step("review/next-design").await?;
-        self.next_step("review/next-review").await
+        advance_back_text_with(
+            Instant::now() + DEFINE_TIMEOUT,
+            POLL,
+            |deadline| async move { self.eval_string_until(js::BACK_TEXT_STATE, deadline).await },
+            || async move { self.run(js::advance_back_text()).await },
+        )
+        .await
     }
 
     // endregion
@@ -799,6 +805,28 @@ where
         Err(error) => return Err(Error::stage("front-text/advance", error)),
     }
     wait_for_editor_state_with("backs/wait-backs", backs_deadline, poll, read_backs).await
+}
+
+/// Upload completion belongs to the preceding image editor. The newly opened
+/// back text editor can expose its Next method before populating its image list.
+/// Wait for that list, then advance once. Any mutation error remains visible;
+/// replaying an uncertain save could advance the project twice.
+async fn advance_back_text_with<R, RFut, A, AFut>(
+    deadline: Instant,
+    poll: Duration,
+    read_state: R,
+    mut advance: A,
+) -> Result<()>
+where
+    R: FnMut(Instant) -> RFut,
+    RFut: Future<Output = Result<String>>,
+    A: FnMut() -> AFut,
+    AFut: Future<Output = Result<()>>,
+{
+    wait_for_editor_state_with("review/wait-back-text", deadline, poll, read_state).await?;
+    advance()
+        .await
+        .map_err(|error| Error::stage("review/next-review", error))
 }
 
 /// State-machine core for back chooser acquisition. Keeping the read and the
@@ -1311,6 +1339,71 @@ mod tests {
         assert_eq!(error.to_string(), "front-text/advance: advance failed");
         assert_eq!(advances.load(Ordering::SeqCst), 1);
         assert_eq!(backs_reads.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn review_waits_for_back_text_initialization_before_advancing_once() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let probes = AtomicUsize::new(0);
+        let advances = AtomicUsize::new(0);
+        advance_back_text_with(
+            Instant::now() + Duration::from_secs(1),
+            Duration::ZERO,
+            |_| {
+                let i = probes.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    Ok([
+                        "wrong-stage",
+                        "layer-loading",
+                        "uninitialized-unpick-list",
+                        "ready",
+                    ][i]
+                        .to_owned())
+                }
+            },
+            || {
+                assert_eq!(probes.load(Ordering::SeqCst), 4);
+                advances.fetch_add(1, Ordering::SeqCst);
+                async { Ok(()) }
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(advances.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn review_never_advances_an_uninitialized_back_editor() {
+        let error = advance_back_text_with(
+            Instant::now() + Duration::from_millis(20),
+            Duration::from_millis(1),
+            |_| async { Ok("uninitialized-unpick-list".to_owned()) },
+            || async { panic!("must not save a null back list") },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.to_string(), "review/wait-back-text: timed out waiting for ready state (state: uninitialized-unpick-list)");
+    }
+
+    #[tokio::test]
+    async fn review_surfaces_uncertain_save_without_replaying_it() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let advances = AtomicUsize::new(0);
+        let error = advance_back_text_with(
+            Instant::now() + Duration::from_secs(1),
+            Duration::ZERO,
+            |_| async { Ok("ready".to_owned()) },
+            || {
+                advances.fetch_add(1, Ordering::SeqCst);
+                async { Err(destroyed_context()) }
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().starts_with("review/next-review:"));
+        assert_eq!(advances.load(Ordering::SeqCst), 1);
     }
 
     fn protocol_error(code: i64, message: &str) -> Error {

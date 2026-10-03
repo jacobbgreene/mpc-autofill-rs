@@ -55,30 +55,45 @@ pub fn product_controls_ready(
 
 pub const NEXT_STEP: &str = "oDesign.setNextStep();";
 
-/// Read-only readiness probe for the front text editor. `setNextStep` exists
+/// Read-only readiness probes for the text editors. `setNextStep` exists
 /// before the text editor's `Init` fills `UnpickList`; calling it then makes
 /// `readySave` call `reset` against `null`. The bundle initializes DesignList
 /// to an empty Array in the constructor, so it must be an Array but need not
 /// yet have the same length as UnpickList.
-pub const FRONT_TEXT_STATE: &str = "(function(){var front='/design/dn_texteditor_front.aspx';\
- if(location.pathname!==front)return 'wrong-stage';\
+macro_rules! text_editor_state {
+    ($side:literal) => {
+        concat!("(function(){var path='/design/dn_texteditor_", $side, ".aspx';\
+ if(location.pathname!==path)return 'wrong-stage';\
  if(document.readyState==='loading')return 'document-loading';\
  var layer=window.oLayer,design=window.oDesign;\
  if(!layer)return 'missing-layer';if(layer.LoadStatus==='Loading')return 'layer-loading';\
  if(!design)return 'missing-design';\
  if(typeof design.setNextStep!=='function'||typeof design.getUnpickList!=='function'||typeof design.getDesignList!=='function')return 'missing-text-methods';\
- if(!design.parameters||!design.parameters.Base||design.parameters.Base.Layer!=='front')return 'wrong-layer';\
+ if(!design.parameters||!design.parameters.Base||design.parameters.Base.Layer!=='", $side, "')return 'wrong-layer';\
  var unpick,designList;try{unpick=design.getUnpickList();designList=design.getDesignList();}catch(e){return 'list-error';}\
  if(!Array.isArray(unpick)||unpick.length===0)return 'uninitialized-unpick-list';\
  if(!Array.isArray(designList))return 'uninitialized-design-list';\
  if(!document.getElementById('btn_next_step'))return 'missing-next-button';\
- return 'ready';})()";
+ return 'ready';})()")
+    };
+}
+
+pub const FRONT_TEXT_STATE: &str = text_editor_state!("front");
+pub const BACK_TEXT_STATE: &str = text_editor_state!("back");
 
 /// Advance from the ready front text editor. Recheck every prerequisite in the
 /// emitted mutation so a poll-to-click turnover cannot save/reset null lists.
 pub fn advance_front_text() -> String {
     format!(
         "(function(){{if({FRONT_TEXT_STATE}!==\"ready\")throw new Error('front text editor is no longer ready');oDesign.setNextStep();}})()"
+    )
+}
+
+/// The back text editor shares the same asynchronous initialization as the
+/// front. Never synthesize its lists or replay a failed save to work around it.
+pub fn advance_back_text() -> String {
+    format!(
+        "(function(){{if({BACK_TEXT_STATE}!==\"ready\")throw new Error('back text editor is no longer ready');oDesign.setNextStep();}})()"
     )
 }
 
@@ -337,6 +352,8 @@ mod tests {
             NEXT_STEP.to_owned(),
             FRONT_TEXT_STATE.to_owned(),
             advance_front_text(),
+            BACK_TEXT_STATE.to_owned(),
+            advance_back_text(),
             BACKS_DESTINATION_STATE.to_owned(),
             EDITOR_QUANTITY_READY.to_owned(),
             BACK_CHOOSER_STATE.to_owned(),
@@ -412,6 +429,42 @@ mod tests {
             &advance_front_text(),
         );
         assert_eq!(output, "0:front text editor is no longer ready");
+    }
+
+    #[test]
+    fn back_text_waits_for_initialized_lists_and_rechecks_before_saving() {
+        let setup = "let calls=0;global.window=global;global.location={pathname:'/design/dn_texteditor_back.aspx'};global.document={readyState:'complete',getElementById:id=>id==='btn_next_step'?{}:null};global.oLayer={LoadStatus:'Idle'};global.oDesign={setNextStep:()=>calls++,getUnpickList:()=>['back-image'],getDesignList:()=>[],parameters:{Base:{Layer:'back'}}};";
+        assert_eq!(evaluate(BACK_TEXT_STATE, setup), "ready");
+        assert_eq!(
+            execute_and_observe(&advance_back_text(), setup, "calls"),
+            "1"
+        );
+        for (change, expected) in [
+            (
+                "oDesign.getUnpickList=()=>null",
+                "uninitialized-unpick-list",
+            ),
+            ("oDesign.getUnpickList=()=>[]", "uninitialized-unpick-list"),
+            (
+                "oDesign.getDesignList=()=>null",
+                "uninitialized-design-list",
+            ),
+            ("oLayer.LoadStatus='Loading'", "layer-loading"),
+            ("oDesign.parameters.Base.Layer='front'", "wrong-layer"),
+            (
+                "location.pathname='/design/dn_texteditor_front.aspx'",
+                "wrong-stage",
+            ),
+            ("document.getElementById=()=>null", "missing-next-button"),
+        ] {
+            let not_ready = format!("{setup}{change};");
+            assert_eq!(evaluate(BACK_TEXT_STATE, &not_ready), expected);
+            let output = node(
+                &format!("{not_ready}try{{eval(process.argv[1])}}catch(e){{process.stdout.write(calls+':'+e.message)}}"),
+                &advance_back_text(),
+            );
+            assert_eq!(output, "0:back text editor is no longer ready");
+        }
     }
 
     #[test]
