@@ -101,9 +101,12 @@ asks where to write its XML order; the imported text file stays unchanged. The
 Open or drop an order XML to browse its cards. Search by name, show all cards,
 backs, or images needing attention, and click a card for a larger preview.
 Use **Change artwork** below any image (or in its enlarged preview) to choose a
-replacement from MPC Autofill. **Change back** browses common cardbacks. A change
-applies to every copy using that image, preserving quantities, slot order, and
-front/back pairings. Save the order to keep the new artwork.
+replacement from MPC Autofill. The common-back widget beside **Start autofill**
+offers a larger preview and **Change back**, keeping the regular grid focused on
+card fronts and individual backs. Common-back failures still appear under
+**Needs attention**. A change applies to every copy using that image, preserving
+quantities, slot order, and front/back pairings. Save the order to keep the new
+artwork.
 Autofill shows each stage and asks you to sign in in Chrome when necessary.
 Completion reports skipped images so you can check them before placing an order.
 
