@@ -1984,6 +1984,21 @@ textarea:focus-visible {
 .gallery-footer {
   justify-content: center;
 }
+.gallery-load-more {
+  display: flex;
+  justify-content: center;
+  padding-top: 20px;
+  min-height: 60px;
+}
+.gallery-load-more .notice {
+  width: 100%;
+  margin: 0;
+}
+.gallery-loaded-count {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
 .artwork-gallery .editor-header h2 {
   overflow-wrap: anywhere;
 }
