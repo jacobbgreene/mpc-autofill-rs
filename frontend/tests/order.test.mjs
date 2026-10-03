@@ -42,15 +42,17 @@ test("skipped cards remain discoverable in needs-attention after completion", ()
   assert.equal(placementCounts(cards).attention, 1);
 });
 
-test("search and face filters work together, including common cardbacks", () => {
+test("the grid searches fronts and individual backs; common backs stay in the overview", () => {
   const cards = [
     card("front"),
     card("back"),
+    card("back", "pending", { cardback: false, name: "Insectile Aberration" }),
     card("front", "pending", { name: "Lightning Bolt", drive_id: "bolt" }),
   ];
-  assert.equal(filterCards(cards, "back", "  ISLAND ").length, 1);
+  assert.equal(filterCards(cards, "back", "  ISLAND ").length, 0);
+  assert.equal(filterCards(cards, "back", "insectile").length, 1);
   assert.equal(filterCards(cards, "all", "bolt").length, 1);
-  assert.equal(filterCards(cards, "all", "island").length, 2);
+  assert.equal(filterCards(cards, "all", "island").length, 1);
   assert.equal(filterCards(cards, "back", "bolt").length, 0);
 });
 

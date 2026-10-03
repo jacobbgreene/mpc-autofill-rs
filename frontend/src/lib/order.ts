@@ -61,6 +61,7 @@ export function filterCards(
   const search = query.trim().toLocaleLowerCase();
   return cards.filter(
     (card) =>
+      (!card.cardback || filter === "attention") &&
       (filter === "all" ||
         (filter === "attention"
           ? needsAttention(card)

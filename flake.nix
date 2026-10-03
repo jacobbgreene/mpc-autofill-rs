@@ -33,6 +33,49 @@
         ];
       in
       {
+        packages.default = pkgs.rustPlatform.buildRustPackage {
+          pname = "mpc-autofill";
+          version = "0.1.0";
+          src = ./.;
+
+          cargoLock.lockFile = ./Cargo.lock;
+          buildFeatures = [ "tauri/custom-protocol" ];
+
+          npmDeps = pkgs.fetchNpmDeps {
+            src = ./frontend;
+            hash = "sha256-ouWioaqTbYxpC0CuHOaouSSrnaT1C2pfVDO+6tDPlww=";
+          };
+          npmRoot = "frontend";
+
+          nativeBuildInputs = with pkgs; [
+            nodejs_22
+            npmHooks.npmConfigHook
+            pkg-config
+            wrapGAppsHook3
+          ];
+          buildInputs = guiLibs;
+
+          preBuild = ''
+            pushd "$npmRoot"
+            npm run build
+            popd
+          '';
+
+          cargoBuildFlags = [ "-p" "mpc-autofill" "--bin" "mpc-autofill" ];
+
+          OPENSSL_NO_VENDOR = 1;
+          doCheck = false;
+
+          preFixup = ''
+            gappsWrapperArgs+=(
+              --set CHROME "${pkgs.chromium}/bin/chromium"
+              --set WEBKIT_DISABLE_DMABUF_RENDERER "1"
+              --prefix GIO_EXTRA_MODULES : "${pkgs.glib-networking}/lib/gio/modules"
+              --prefix XDG_DATA_DIRS : "${pkgs.gtk3}/share/gsettings-schemas/${pkgs.gtk3.name}:${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}"
+            )
+          '';
+        };
+
         # Fast shell for the pure-logic crates — no WebKitGTK to fetch.
         devShells.core = pkgs.mkShell {
           packages = rust ++ [ pkgs.pkg-config pkgs.openssl pkgs.nodejs_22 ];

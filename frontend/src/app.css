@@ -502,7 +502,7 @@ main {
   font-size: 10px;
   font-weight: 650;
 }
-/* Order identity and common back stay compact, leaving the grid the main stage. */
+/* Keep the common back and autofill action together beside the order details. */
 .order-overview {
   display: flex;
   align-items: center;
@@ -538,44 +538,91 @@ main {
   background: var(--surface);
   border-radius: 5px;
 }
+.order-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-left: auto;
+  max-width: 100%;
+}
 .common-back {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
   text-align: left;
-  padding: 0;
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
-  max-width: 195px;
+  padding: 14px;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  width: 280px;
+  max-width: 100%;
 }
-.common-back:hover strong {
-  color: var(--accent);
+.common-back.needs-attention {
+  border-color: var(--fail);
 }
-.common-back > span:last-child {
+.common-back-info {
   display: grid;
-  gap: 5px;
+  gap: 6px;
   min-width: 0;
 }
 .common-back strong {
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .common-back .eyebrow {
-  font-size: 8px;
+  font-size: 10px;
   letter-spacing: 1.1px;
 }
 .common-back .muted {
+  font-size: 11px;
+}
+.common-back-change {
+  justify-self: start;
+  margin-top: 2px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: transparent;
+}
+.common-back-warning {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--fail);
+  font-size: 11px;
+}
+.back-preview {
+  position: relative;
+  flex-shrink: 0;
+  border: 0;
+  padding: 0;
+  border-radius: 6px;
+  background: var(--accent-soft);
+}
+.back-preview-hint {
+  position: absolute;
+  bottom: 0;
+  inset-inline: 0;
+  padding: 5px 0;
+  border-radius: 0 0 6px 6px;
+  background: #15131ddd;
+  color: #fff;
   font-size: 10px;
+  opacity: 0;
+}
+.back-preview:hover .back-preview-hint,
+.back-preview:focus-visible .back-preview-hint {
+  opacity: 1;
 }
 .back-mini {
   display: grid;
   place-items: center;
-  width: 43px;
-  height: 60px;
+  width: 76px;
+  height: 106px;
   flex-shrink: 0;
   border-radius: 5px;
   background: var(--accent-soft);
@@ -1213,8 +1260,9 @@ summary {
   .order-heading {
     flex: 1 1 210px;
   }
-  .common-back {
-    max-width: 140px;
+  .order-actions {
+    flex: 1 1 100%;
+    justify-content: space-between;
   }
   .start-action .button {
     min-width: 140px;
@@ -1276,12 +1324,13 @@ summary {
     flex-basis: 100%;
   }
   .common-back {
-    margin-right: auto;
+    flex: 1 1 260px;
   }
   .start-action {
     width: auto;
     flex-direction: column;
-    align-items: flex-end;
+    align-items: stretch;
+    flex: 1 1 140px;
   }
   .start-action > span {
     display: none;

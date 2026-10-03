@@ -19,6 +19,7 @@
     filterCards,
     needsAttention,
     patchCards,
+    statusLabels,
     type Card,
     type Face,
     type Filter,
@@ -42,6 +43,7 @@
   let selectedKey: string | null = null;
   let artworkCard: Card | null = null;
   let artworkApplying = false;
+  let failedBackThumb: string | null = null;
   let downloadCompleted = 0;
   let downloadFailures = 0;
   let searchInput: HTMLInputElement;
@@ -60,6 +62,7 @@
     { value: "attention", label: "Needs attention" },
   ];
   $: cardbacks = cards.filter((card) => card.cardback);
+  $: deckImageCount = cards.length - cardbacks.length;
   $: attentionCount = cards.filter(needsAttention).length;
   $: visibleCards = filterCards(cards, filter, query);
   $: selectedCard = cards.find((card) => cardKey(card) === selectedKey) ?? null;
@@ -412,7 +415,7 @@
     await tick();
     document
       .querySelector<HTMLButtonElement>(
-        `.card-change-art[data-card-key="${CSS.escape(`${face}:${previewId}`)}"]`,
+        `:is(.card-change-art, .common-back-change)[data-card-key="${CSS.escape(`${face}:${previewId}`)}"]`,
       )
       ?.focus({ preventScroll: true });
   }
@@ -626,45 +629,69 @@
             ><span>{summary.foil ? "Foil finish" : "Non-foil"}</span>
           </div>
         </div>
-        {#each cardbacks as card (cardKey(card))}
-          <button
-            class="common-back"
-            on:click={() => (selectedKey = cardKey(card))}
-            aria-label={`Preview common cardback, ${card.name}`}
-          >
-            <span class="back-mini"
-              >{#if card.thumb}<img src={card.thumb} alt="" />{:else}<Icon
-                  size={22}
-                />{/if}</span
+        <div class="order-actions">
+          {#each cardbacks as card (cardKey(card))}
+            <div
+              class="common-back"
+              class:needs-attention={needsAttention(card)}
             >
-            <span
-              ><span class="eyebrow">COMMON BACK</span><strong
-                title={displayName(card)}>{displayName(card)}</strong
-              ><span class="muted"
-                >{card.slots.length} card{card.slots.length === 1
-                  ? ""
-                  : "s"}</span
-              ></span
+              <button
+                class="back-preview"
+                on:click={() => (selectedKey = cardKey(card))}
+                aria-label={`Preview common cardback, ${card.name}`}
+                title="Preview common back"
+              >
+                <span class="back-mini"
+                  >{#if card.thumb && card.thumb !== failedBackThumb}<img
+                      src={card.thumb}
+                      alt=""
+                      on:error={() => (failedBackThumb = card.thumb ?? null)}
+                    />{:else}<Icon size={22} />{/if}</span
+                >
+                <span class="back-preview-hint">Preview</span>
+              </button>
+              <div class="common-back-info">
+                <span class="eyebrow">COMMON BACK</span><strong
+                  title={displayName(card)}>{displayName(card)}</strong
+                ><span class="muted"
+                  >Used on {card.slots.length} card{card.slots.length === 1
+                    ? ""
+                    : "s"}</span
+                >
+                {#if needsAttention(card)}<span
+                    class="common-back-warning"
+                    title={card.error}
+                  >
+                    <Icon name="warning" size={13} />{statusLabels[card.status]}
+                  </span>{/if}
+                <button
+                  class="button secondary small common-back-change"
+                  data-card-key={cardKey(card)}
+                  disabled={busy || !connected}
+                  on:click={() => changeArtwork(card)}
+                  ><Icon name="image" size={14} />Change back</button
+                >
+              </div>
+            </div>
+          {/each}
+          <div class="start-action">
+            <button
+              class="button primary"
+              on:click={fill}
+              disabled={busy || !connected}
+              ><Icon name={running ? "clock" : "arrow"} size={17} />{running
+                ? "Autofill in progress"
+                : phase === "done"
+                  ? "Start new project"
+                  : error
+                    ? "Start over"
+                    : "Start autofill"}</button
+            ><span
+              >{phase === "done" || error
+                ? "Creates a new project in Chrome"
+                : "Opens MakePlayingCards in Chrome"}</span
             >
-          </button>
-        {/each}
-        <div class="start-action">
-          <button
-            class="button primary"
-            on:click={fill}
-            disabled={busy || !connected}
-            ><Icon name={running ? "clock" : "arrow"} size={17} />{running
-              ? "Autofill in progress"
-              : phase === "done"
-                ? "Start new project"
-                : error
-                  ? "Start over"
-                  : "Start autofill"}</button
-          ><span
-            >{phase === "done" || error
-              ? "Creates a new project in Chrome"
-              : "Opens MakePlayingCards in Chrome"}</span
-          >
+          </div>
         </div>
       </section>
 
@@ -687,9 +714,9 @@
         <div class="library-heading">
           <div>
             <h2 id="library-title">
-              Your cards <span class="count-badge">{cards.length}</span>
+              Your cards <span class="count-badge">{deckImageCount}</span>
             </h2>
-            <p>Every front, every back. Take a closer look.</p>
+            <p>Preview your cards or change their artwork.</p>
           </div>
           <label class="search-field"
             ><Icon name="search" size={17} /><input
