@@ -5,6 +5,7 @@
 //! the frontend as Tauri events.
 
 mod artwork;
+mod artwork_thumbnail;
 mod session;
 
 use std::path::PathBuf;
@@ -175,6 +176,7 @@ fn main() {
         .init();
 
     tauri::Builder::default()
+        .manage(artwork_thumbnail::ArtworkThumbnails::default())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let (inbox, receiver) = mpsc::channel(16);
@@ -185,7 +187,7 @@ fn main() {
             app.manage(AppState { inbox });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load_order, thumbnails, download, fill, get_decklist, preview_decklist, edit_decklist, save_order, read_decklist, preview_new_decklist, create_order, artwork::search_artwork])
+        .invoke_handler(tauri::generate_handler![load_order, thumbnails, download, fill, get_decklist, preview_decklist, edit_decklist, save_order, read_decklist, preview_new_decklist, create_order, artwork::search_artwork, artwork_thumbnail::artwork_thumbnail])
         .build(tauri::generate_context!())
         .expect("failed to start MPC Autofill")
         .run(|app, event| {

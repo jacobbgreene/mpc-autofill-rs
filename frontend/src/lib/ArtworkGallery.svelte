@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher, onMount, onDestroy } from "svelte";
   import Icon from "./Icon.svelte";
+  import ArtworkThumbnail from "./ArtworkThumbnail.svelte";
   import {
     ARTWORK_PAGE_SIZE,
     type ArtworkSearch,
@@ -28,6 +29,8 @@
   let error = "";
   let requested = { page, query };
   let generation = 0;
+  let failedPreviews = new Set<string>();
+  let previewRetry = 0;
   $: pages = Math.max(1, Math.ceil((results?.count ?? 0) / ARTWORK_PAGE_SIZE));
 
   onMount(() => {
@@ -46,6 +49,7 @@
       const found = await search(nextQuery, nextPage, kind);
       if (token !== generation) return;
       results = found;
+      failedPreviews = new Set();
       query = nextQuery;
       page = nextPage;
       pageInput = page + 1;
@@ -132,6 +136,13 @@
       <p class="editor-help">
         {results.count} options · Choose an image to use it in your deck.
       </p>
+      {#if failedPreviews.size}<button
+          class="text-button retry-preview"
+          on:click={() => {
+            failedPreviews = new Set();
+            previewRetry++;
+          }}>Retry failed previews</button
+        >{/if}
       <div class="artwork-grid" class:is-loading={busy}>
         {#each results.cards as art, i (art.drive_id)}
           <button
@@ -148,7 +159,13 @@
               })}
           >
             <span class="artwork-thumb"
-              ><img src={art.thumb} alt={art.label} loading="lazy" /></span
+              ><ArtworkThumbnail
+                driveId={art.drive_id}
+                label={art.label}
+                retry={previewRetry}
+                on:error={() =>
+                  (failedPreviews = new Set([...failedPreviews, art.drive_id]))}
+              /></span
             >
             <strong>{art.label}</strong><span>{art.source} · {art.dpi} DPI</span
             >

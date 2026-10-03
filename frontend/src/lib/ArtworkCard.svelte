@@ -2,6 +2,7 @@
   import { createEventDispatcher, onMount, onDestroy } from "svelte";
   import Icon from "./Icon.svelte";
   import ArtworkGallery from "./ArtworkGallery.svelte";
+  import ArtworkThumbnail from "./ArtworkThumbnail.svelte";
   import {
     ARTWORK_PAGE_SIZE,
     type ArtworkSearch,
@@ -25,7 +26,8 @@
   let error = "";
   let gallery = false;
   let generation = 0;
-  let failedImage = "";
+  let previewFailed = false;
+  let previewRetry = 0;
   onMount(() => {
     if (!selected) void load(0, true);
   });
@@ -69,7 +71,8 @@
     query = choice.query;
     count = choice.count;
     variant = choice.index + 1;
-    failedImage = "";
+    previewFailed = false;
+    previewRetry = 0;
     dispatch("choose", choice);
   }
   function jump() {
@@ -105,11 +108,13 @@
       disabled={busy || disabled}
       on:click={() => (gallery = true)}
     >
-      {#if selected && failedImage !== selected.art.drive_id}<img
-          src={selected.art.thumb}
-          alt={selected.art.label}
-          on:error={() => (failedImage = selected?.art.drive_id ?? "")}
-        />
+      {#if selected}{#key selected.art.drive_id}<ArtworkThumbnail
+            driveId={selected.art.drive_id}
+            label={selected.art.label}
+            retry={previewRetry}
+            on:error={() => (previewFailed = true)}
+            on:loaded={() => (previewFailed = false)}
+          />{/key}
       {:else}<span class="artwork-placeholder"
           ><Icon name="image" size={30} /><span
             >{busy
@@ -162,6 +167,13 @@
         class="text-button"
         disabled={busy || disabled}
         on:click={() => load(selected?.index ?? 0)}>Retry</button
+      >{/if}
+    {#if previewFailed}<button
+        class="text-button retry-preview"
+        on:click={() => {
+          previewFailed = false;
+          previewRetry++;
+        }}>Retry preview</button
       >{/if}
     <button
       class="button secondary small browse-artwork"

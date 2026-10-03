@@ -1,0 +1,86 @@
+COMMANDER (1)
+1 Smaug the Magnificent
+
+CREATURES (20)
+1 Academy Manufactor
+1 Atsushi, the Blazing Sky
+1 Captain Lannery Storm
+1 Combat Celebrant
+1 Gadrak, the Crown-Scourge
+1 Ganax, Astral Hunter
+1 Goldlust Triad
+1 Goldspan Dragon
+1 Hedron Detonator
+1 Hellkite Tyrant
+1 Ingenious Artillerist
+1 Karlach, Fury of Avernus
+1 Magda, Brazen Outlaw
+1 Magda, the Hoardmaster
+1 Professional Face-Breaker
+1 Rapacious Dragon
+1 Reckless Fireweaver
+1 Scourge of the Throne
+1 Storm-Kiln Artist
+1 Xorn
+
+ARTIFACTS (14)
+1 Arcane Signet
+1 Cursed Mirror
+1 Endless Atlas
+1 Idol of Oblivion
+1 Inspiring Statuary
+1 Lightning Greaves
+1 Liquimetal Torque
+1 Mind Stone
+1 Mithril Coat
+1 Ruby Medallion
+1 Sol Ring
+1 Strionic Resonator
+1 Swiftfoot Boots
+1 The Reaver Cleaver
+
+ENCHANTMENTS (9)
+1 Aggravated Assault
+1 Curse of Opulence
+1 Fiery Emancipation
+1 Goblin Bombardment
+1 Gratuitous Violence
+1 Guild Artisan
+1 Rain of Riches
+1 The Misty Mountains Cold
+1 There and Back Again
+
+INSTANTS (12)
+1 Abrade
+1 Big Score
+1 Bolt Bend
+1 Chaos Warp
+1 Chef's Kiss
+1 Demand Answers
+1 Return the Favor
+1 Tibalt's Trickery
+1 Unexpected Windfall
+1 Untimely Malfunction
+1 Valakut Awakening
+1 Wild Magic Surge
+
+SORCERIES (9)
+1 Blasphemous Act
+1 Brass's Bounty
+1 Faithless Looting
+1 Light Up the Stage
+1 Reckless Impulse
+1 Seize the Day
+1 Seize the Spoils
+1 Vandalblast
+1 Wheel of Misfortune
+
+LANDS (35)
+28 Mountain
+1 Treasure Vault
+1 Mines of Moria
+1 War Room
+1 Great Furnace
+1 Buried Ruin
+1 High Market
+1 Dragon-Cursed Halls

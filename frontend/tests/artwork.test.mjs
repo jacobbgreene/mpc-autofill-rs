@@ -1,9 +1,34 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createArtworkSearch } from "../src/lib/artwork.ts";
+import {
+  createArtworkSearch,
+  createArtworkPreview,
+} from "../src/lib/artwork.ts";
 
 const result = { cards: [], count: 0, next_page: null };
 const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+test("tiles and galleries share local previews; failed previews remain retryable", async () => {
+  let calls = 0;
+  const preview = createArtworkPreview(async (id) => {
+    calls++;
+    if (calls === 1) throw new Error("No connection");
+    return `asset://localhost/${id}.jpg`;
+  });
+  const failed = preview("smaug");
+  assert.equal(preview("smaug"), failed);
+  await assert.rejects(failed, /No connection/);
+  const local = await preview("smaug");
+  assert.equal(local, "asset://localhost/smaug.jpg");
+  assert.equal(await preview("smaug"), local);
+  assert.equal(calls, 2);
+  await preview("smaug", true);
+  assert.equal(
+    calls,
+    3,
+    "explicit retry reloads a preview that could not render",
+  );
+});
 
 test("a large deck limits concurrent searches and shares pages with its gallery", async () => {
   const started = [];

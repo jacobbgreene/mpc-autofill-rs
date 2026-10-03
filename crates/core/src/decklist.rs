@@ -115,6 +115,44 @@ fn resolve(
     }
 }
 
+fn is_section_heading(line: &str) -> bool {
+    let Some((section, count)) = line.split_once('(') else {
+        return false;
+    };
+    let Some(count) = count.strip_suffix(')') else {
+        return false;
+    };
+    if count.trim().parse::<u32>().is_err() {
+        return false;
+    }
+    matches!(
+        section.trim().to_ascii_lowercase().as_str(),
+        "commander"
+            | "commanders"
+            | "creature"
+            | "creatures"
+            | "artifact"
+            | "artifacts"
+            | "enchantment"
+            | "enchantments"
+            | "instant"
+            | "instants"
+            | "sorcery"
+            | "sorceries"
+            | "land"
+            | "lands"
+            | "planeswalker"
+            | "planeswalkers"
+            | "battle"
+            | "battles"
+            | "mainboard"
+            | "sideboard"
+            | "maybeboard"
+            | "deck"
+            | "tokens"
+    )
+}
+
 fn parse_line(line: &str, number: usize) -> Result<(u32, &str, Option<&str>)> {
     let (count, names) = match line.split_once(char::is_whitespace) {
         Some((prefix, rest)) if prefix.chars().next().is_some_and(|c| c.is_ascii_digit()) => {
@@ -218,7 +256,11 @@ impl Order {
         };
         for (index, line) in text.lines().enumerate() {
             let line = line.trim().trim_start_matches('\u{feff}');
-            if line.is_empty() || line.starts_with('#') || line.starts_with("//") {
+            if line.is_empty()
+                || line.starts_with('#')
+                || line.starts_with("//")
+                || is_section_heading(line)
+            {
                 continue;
             }
             let (quantity, name, back_name) = parse_line(line, index + 1)?;
@@ -340,6 +382,53 @@ mod tests {
     const XML: &str = r#"<order><details><quantity>3</quantity><stock>(S30) Standard Smooth</stock><foil>false</foil></details><fronts><card><id>a</id><name>Island (Art A).png</name><query>Island</query><slots>0,2</slots></card><card><id>b</id><name>Delver.png</name><slots>1</slots></card></fronts><backs><card><id>special</id><name>Insect.png</name><slots>1</slots></card></backs><cardback>common</cardback></order>"#;
     fn order() -> Order {
         Order::from_xml("Deck", XML).unwrap()
+    }
+
+    #[test]
+    fn smaug_deck_ignores_category_headings_and_keeps_all_100_cards() {
+        let text = include_str!("../tests/fixtures/smaug.txt");
+        let preview = order().preview_decklist(text, &[]).unwrap();
+        assert_eq!(preview.quantity, 100);
+        assert_eq!(preview.unresolved.len(), 73);
+        assert_eq!(preview.unresolved[0].query, "Smaug the Magnificent");
+        let selections: Vec<_> = preview
+            .unresolved
+            .iter()
+            .enumerate()
+            .map(|(i, item)| ArtworkSelection {
+                query: item.query.clone(),
+                face: item.face.clone(),
+                drive_id: format!("art-{i}"),
+                name: item.query.clone(),
+            })
+            .collect();
+        let edited = order().edit_decklist(text, &selections).unwrap();
+        assert_eq!(edited.details.quantity, 100);
+        assert_eq!(
+            edited
+                .fronts
+                .iter()
+                .find(|card| card.query.as_deref() == Some("Mountain"))
+                .unwrap()
+                .slots
+                .len(),
+            28
+        );
+    }
+
+    #[test]
+    fn category_detection_does_not_hide_card_names_or_artwork_suffixes() {
+        for text in [
+            "Smaug the Magnificent (Normal)",
+            "Mountain (123)",
+            "1 Lands (35)",
+            "Creature Swap",
+            "Mystery Category (2)",
+        ] {
+            assert!(!is_section_heading(text));
+        }
+        assert!(is_section_heading("Creatures (20)"));
+        assert!(is_section_heading("COMMANDER (1)"));
     }
 
     #[test]

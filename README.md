@@ -63,6 +63,10 @@ gallery with search and the current choice highlighted. The displayed image is
 the one used in your deck. Unmatched cards can be searched by another name in
 their gallery.
 
+Previews are cached locally, with fallback between MPC Autofill's image CDN and
+Google Drive. If a preview cannot load, use **Retry preview** on the card or
+**Retry failed previews** in its gallery.
+
 Expand **Print settings** to choose a name, cardstock and finish, and browse the
 cardback gallery for a common reverse. **Edit decklist** returns to the text;
 artwork choices for matching names are retained when you change quantities.
@@ -88,7 +92,8 @@ inside the same order. Both accept pasted text or an imported `.txt` file:
 ```
 
 Use one card per line with an optional quantity (`4` or `4x`). Blank lines and
-lines beginning with `#` or `//` are ignored. `Front name | Back name` specifies
+lines beginning with `#` or `//` are ignored, along with category headings such
+as `COMMANDER (1)` and `CREATURES (20)`. `Front name | Back name` specifies
 a custom reverse. Existing artwork and back pairings are retained; new names
 must have artwork chosen from the MPC Autofill search results before changes can
 be applied. Use the full artwork name or image ID to distinguish variants with
@@ -111,5 +116,5 @@ The normal Rust suite runs offline with `nix develop --command cargo test --work
 An optional live artwork-search check is available with:
 
 ```sh
-nix develop --command cargo test -p mpc-autofill artwork::tests -- --ignored
+nix develop --command cargo test -p mpc-autofill -- --ignored
 ```

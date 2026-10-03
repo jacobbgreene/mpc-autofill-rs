@@ -27,6 +27,21 @@ export type ArtworkChoice = {
   count: number;
 };
 
+export function createArtworkPreview(load: (id: string) => Promise<string>) {
+  const cache = new Map<string, Promise<string>>();
+  return (id: string, retry = false) => {
+    if (retry) cache.delete(id);
+    const existing = cache.get(id);
+    if (existing) return existing;
+    const request = load(id);
+    cache.set(id, request);
+    void request.catch(() => {
+      if (cache.get(id) === request) cache.delete(id);
+    });
+    return request;
+  };
+}
+
 // One queue per editor keeps large decks from flooding the artwork service.
 // Tiles and the gallery share cached pages, including requests already in flight.
 export function createArtworkSearch(load: ArtworkSearch, concurrency = 4) {

@@ -5,6 +5,7 @@
   import Icon from "./Icon.svelte";
   import ArtworkCard from "./ArtworkCard.svelte";
   import ArtworkGallery from "./ArtworkGallery.svelte";
+  import ArtworkThumbnail from "./ArtworkThumbnail.svelte";
   import {
     createArtworkSearch,
     type ArtworkChoice,
@@ -290,8 +291,9 @@
         />
         <p id="decklist-help" class="editor-help">
           One card per line: <code>4 Island</code> or <code>4x Island</code>.
-          Use <code>Front name | Back name</code> for double-faced cards. Blank lines
-          and # comments are ignored. Maximum 612 cards.
+          Use <code>Front name | Back name</code> for double-faced cards. Blank
+          lines and # comments are ignored, as are headings like
+          <code>CREATURES (20)</code>. Maximum 612 cards.
         </p>
       </div>
     {/if}
@@ -358,10 +360,12 @@
         </div>{/if}
       {#if mode === "create" && preview.needs_common_back}
         <div class="new-order-cardback">
-          {#if commonBack}<img
-              src={commonBack.art.thumb}
-              alt={commonBack.art.label}
-            />{:else}<span class="back-mini"><Icon size={24} /></span>{/if}
+          {#if commonBack}<span class="chosen-back-preview"
+              ><ArtworkThumbnail
+                driveId={commonBack.art.drive_id}
+                label={commonBack.art.label}
+              /></span
+            >{:else}<span class="back-mini"><Icon size={24} /></span>{/if}
           <div>
             <strong
               >{commonBack
