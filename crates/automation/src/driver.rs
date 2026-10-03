@@ -1093,7 +1093,8 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    // Virtual time keeps the 10 ms deadline independent of OS timer granularity.
+    #[tokio::test(start_paused = true)]
     async fn slot_wait_final_evaluation_timeout_keeps_uninitialized_index_state() {
         let attempts = std::sync::atomic::AtomicUsize::new(0);
         let error = wait_for_editor_state_with(
@@ -1123,7 +1124,7 @@ mod tests {
         assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 2);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn slot_wait_context_rejections_until_deadline_keep_uninitialized_index_state() {
         let attempts = std::sync::atomic::AtomicUsize::new(0);
         let error = wait_for_editor_state_with(
