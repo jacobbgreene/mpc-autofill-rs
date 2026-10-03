@@ -54,6 +54,21 @@ to an existing project, order combining/splitting, PDF export, and save-to-accou
 
 ## Working with an order
 
+Select **Browse saved decks** on the welcome screen to open the deck library.
+Search by name or path, sort by name or save date, and click a deck to open it. Use
+**Saved decks** in the order toolbar to return; unsaved changes require confirmation.
+**Back to start** returns to the original welcome screen.
+
+New orders default to `Documents/MPC Autofill/Decks`, outside the source checkout
+and installed application. **Save as…** can choose any other location. Orders
+opened or saved elsewhere are remembered by path in `saved-decks.json` in the
+platform's app data directory. On first use, existing valid order XML files
+directly in Documents are also included without moving or copying them. The
+library scans its default folder and refreshes remembered files when opened;
+**Refresh** picks up external changes. Missing files are skipped with a notice.
+If the platform has no Documents directory, the default deck folder is `decks`
+inside the app data directory. Artwork thumbnails remain in the separate cache.
+
 Start with **Import .txt decklist**, **Paste a decklist**, or drop a `.txt` file
 onto the welcome screen. Importing a file opens an artwork grid immediately;
 for pasted lists, select **Choose artwork**. Each new image starts with the first

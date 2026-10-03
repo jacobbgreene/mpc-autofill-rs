@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { invoke, convertFileSrc } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -11,6 +11,7 @@
   import ProgressPanel from "./lib/ProgressPanel.svelte";
   import DeckEditor from "./lib/DeckEditor.svelte";
   import ThemePicker from "./lib/ThemePicker.svelte";
+  import SavedDecks from "./lib/SavedDecks.svelte";
   import {
     cardKey,
     displayName,
@@ -25,6 +26,7 @@
   } from "./lib/order";
 
   let summary: OrderSummary | null = null;
+  let homePage: "welcome" | "saved" = "welcome";
   let cards: Card[] = [];
   let phase = "";
   let busy = false;
@@ -32,6 +34,7 @@
   let error = "";
   let orderError = "";
   let previewError = "";
+  let libraryWarning = "";
   let dragging = false;
   let query = "";
   let filter: Filter = "all";
@@ -88,6 +91,11 @@
     async function connect() {
       try {
         await Promise.all([
+          register(
+            listen<string>("library-warning", ({ payload }) => {
+              libraryWarning = payload;
+            }),
+          ),
           register(
             listen<{ drive_id: string; ok: boolean; error?: string }>(
               "download-progress",
@@ -189,6 +197,7 @@
     if (busy || !connected) return;
     busy = true;
     orderError = "";
+    libraryWarning = "";
     dragging = false;
     try {
       if (
@@ -214,6 +223,8 @@
       filter = "all";
       selectedKey = null;
       savedMessage = "";
+      await tick();
+      window.scrollTo({ top: 0 });
       invoke("thumbnails").catch(() => {
         // A thumbnail failure does not prevent full image downloads or autofill.
         if (summary === loaded)
@@ -309,13 +320,25 @@
     busy = true;
     orderError = "";
     savedMessage = "";
+    libraryWarning = "";
     try {
       let path: string | null = null;
       if (saveAs || !summary.path) {
+        let defaultPath = summary.path;
+        if (!defaultPath) {
+          const fileName = `${summary.name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")}.xml`;
+          try {
+            defaultPath = await invoke<string>("default_deck_path", {
+              fileName,
+            });
+          } catch {
+            defaultPath = fileName;
+            libraryWarning =
+              "The default deck folder is unavailable. Choose another save location.";
+          }
+        }
         path = await save({
-          defaultPath:
-            summary.path ||
-            `${summary.name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")}.xml`,
+          defaultPath,
           filters: [{ name: "Order XML", extensions: ["xml"] }],
         });
         if (!path) return;
@@ -327,6 +350,43 @@
     } finally {
       busy = false;
     }
+  }
+
+  async function browseSavedDecks() {
+    if (busy) return;
+    busy = true;
+    try {
+      if (
+        summary?.dirty &&
+        !(await confirm(
+          "Return to saved decks and discard your unsaved changes?",
+          { title: "Unsaved changes", kind: "warning" },
+        ))
+      )
+        return;
+      if (frame !== null) cancelAnimationFrame(frame);
+      frame = null;
+      pending = [];
+      summary = null;
+      homePage = "saved";
+      cards = [];
+      selectedKey = null;
+      orderError = "";
+      libraryWarning = "";
+      await tick();
+      window.scrollTo({ top: 0 });
+    } catch (e) {
+      orderError = `Could not open saved decks: ${String(e)}`;
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function showWelcome() {
+    homePage = "welcome";
+    orderError = "";
+    await tick();
+    window.scrollTo({ top: 0 });
   }
 
   function applyEditedOrder(edited: OrderSummary) {
@@ -402,6 +462,11 @@
         ><button
           class="button secondary small"
           disabled={busy}
+          on:click={browseSavedDecks}
+          ><Icon name="grid" size={16} />Saved decks</button
+        ><button
+          class="button secondary small"
+          disabled={busy}
           on:click={() => (editorMode = "edit")}>Edit list</button
         ><button
           class="button secondary small"
@@ -442,61 +507,82 @@
       </div>
     {/if}
 
+    {#if libraryWarning}<p class="notice" role="status">
+        {libraryWarning}
+      </p>{/if}
     {#if !summary}
-      <section class="welcome" aria-labelledby="welcome-title">
-        <div class="welcome-art" aria-hidden="true">
-          <span class="decor-card card-left"></span><span
-            class="decor-card card-right"
-          ></span><span class="decor-card card-center"><Icon size={46} /></span>
-        </div>
-        <p class="eyebrow">YOUR NEXT DECK STARTS HERE</p>
-        <h1 id="welcome-title">
-          Great cards.<br /><span>Less clicking.</span>
-        </h1>
-        <p class="welcome-description">
-          Bring your decklist. We’ll prepare the images and<br
-            class="wide-only"
-          /> build your MakePlayingCards project for you.
-        </p>
-        <div class="drop-zone" class:dragging>
-          <span class="drop-icon"><Icon name="import" size={24} /></span>
-          <div>
-            <h2>
-              {dragging
-                ? "Drop your file here"
-                : "Drop a decklist or order here"}
-            </h2>
-            <p>Text decklist (.txt) or MPC Autofill order (.xml)</p>
+      {#if homePage === "saved"}
+        <SavedDecks
+          disabled={busy || !connected}
+          on:select={(event) => loadOrder(event.detail)}
+          on:open={(event) => openOrder(event.detail)}
+          on:paste={pasteDecklist}
+          on:home={showWelcome}
+        />
+      {:else}
+        <section class="welcome" aria-labelledby="welcome-title">
+          <div class="welcome-art" aria-hidden="true">
+            <span class="decor-card card-left"></span><span
+              class="decor-card card-right"
+            ></span><span class="decor-card card-center"
+              ><Icon size={46} /></span
+            >
           </div>
-          <button
-            class="button secondary"
-            on:click={() => openOrder()}
-            disabled={busy || !connected}
-            >{busy ? "Opening…" : "Open order"}<Icon
-              name="arrow"
-              size={16}
-            /></button
-          >
-        </div>
-        <div class="welcome-import-actions">
-          <button
-            class="button primary"
-            disabled={busy || !connected}
-            on:click={() => openOrder(true)}
-            ><Icon name="import" size={17} />Import .txt decklist</button
-          >
-          <button
-            class="button secondary"
-            disabled={busy || !connected}
-            on:click={pasteDecklist}>Paste a decklist</button
-          >
-        </div>
-        <ol class="welcome-steps">
-          <li><span>01</span>Preview your cards</li>
-          <li><span>02</span>Start autofill</li>
-          <li><span>03</span>Review in Chrome</li>
-        </ol>
-      </section>
+          <p class="eyebrow">YOUR NEXT DECK STARTS HERE</p>
+          <h1 id="welcome-title">
+            Great cards.<br /><span>Less clicking.</span>
+          </h1>
+          <p class="welcome-description">
+            Bring your decklist. We’ll prepare the images and<br
+              class="wide-only"
+            /> build your MakePlayingCards project for you.
+          </p>
+          <div class="drop-zone" class:dragging>
+            <span class="drop-icon"><Icon name="import" size={24} /></span>
+            <div>
+              <h2>
+                {dragging
+                  ? "Drop your file here"
+                  : "Drop a decklist or order here"}
+              </h2>
+              <p>Text decklist (.txt) or MPC Autofill order (.xml)</p>
+            </div>
+            <button
+              class="button secondary"
+              on:click={() => openOrder()}
+              disabled={busy || !connected}
+              >{busy ? "Opening…" : "Open order"}<Icon
+                name="arrow"
+                size={16}
+              /></button
+            >
+          </div>
+          <div class="welcome-import-actions">
+            <button
+              class="button primary"
+              disabled={busy || !connected}
+              on:click={() => openOrder(true)}
+              ><Icon name="import" size={17} />Import .txt decklist</button
+            >
+            <button
+              class="button secondary"
+              disabled={busy || !connected}
+              on:click={pasteDecklist}>Paste a decklist</button
+            >
+            <button
+              class="button secondary"
+              disabled={busy || !connected}
+              on:click={browseSavedDecks}
+              ><Icon name="grid" size={17} />Browse saved decks</button
+            >
+          </div>
+          <ol class="welcome-steps">
+            <li><span>01</span>Preview your cards</li>
+            <li><span>02</span>Start autofill</li>
+            <li><span>03</span>Review in Chrome</li>
+          </ol>
+        </section>
+      {/if}
     {:else}
       <section class="order-overview" aria-labelledby="order-title">
         <div class="order-heading">

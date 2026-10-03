@@ -15,6 +15,9 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, oneshot};
 
+use crate::files::write_atomic;
+use crate::saved_decks::SavedDecks;
+
 /// How many images to fetch and process at once.
 const DOWNLOAD_CONCURRENCY: usize = 8;
 
@@ -225,7 +228,23 @@ impl Session {
         self.order_path = path;
         self.dirty = false;
         self.order = Some(order);
+        self.remember_order().await;
         self.summary()
+    }
+
+    async fn remember_order(&self) {
+        if let Err(error) = self
+            .app
+            .state::<SavedDecks>()
+            .remember(&self.order_path)
+            .await
+        {
+            tracing::warn!("could not remember saved deck: {error}");
+            let _ = self.app.emit(
+                "library-warning",
+                format!("Your order is available, but could not be added to Saved decks: {error}"),
+            );
+        }
     }
 
     fn summary(&self) -> Result<OrderSummary, String> {
@@ -321,7 +340,7 @@ impl Session {
             .to_xml()
             .map_err(|e| e.to_string())?;
         let dest = path.clone();
-        tokio::task::spawn_blocking(move || write_order_file(&dest, &xml))
+        tokio::task::spawn_blocking(move || write_atomic(&dest, &xml))
             .await
             .map_err(|e| e.to_string())??;
         if let Some(order) = self.order.as_mut() {
@@ -333,6 +352,7 @@ impl Session {
         }
         self.order_path = path;
         self.dirty = false;
+        self.remember_order().await;
         self.summary()
     }
 
@@ -526,30 +546,6 @@ impl Session {
     }
 }
 
-fn write_order_file(path: &std::path::Path, xml: &str) -> Result<(), String> {
-    use std::io::Write;
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| e.to_string())?
-        .as_nanos();
-    let temporary = path.with_file_name(format!(".mpc-order-{}-{stamp}.tmp", std::process::id()));
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&temporary)
-        .map_err(|e| e.to_string())?;
-    let result = (|| {
-        file.write_all(xml.as_bytes())?;
-        file.sync_all()?;
-        drop(file);
-        std::fs::rename(&temporary, path)
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temporary);
-    }
-    result.map_err(|e| e.to_string())
-}
-
 /// A common back can use the editor's Same mode only when it is the sole back
 /// image and covers every requested card exactly once.
 fn eligible_common_back(order: &Order) -> bool {
@@ -648,14 +644,14 @@ mod tests {
         std::fs::create_dir(&dir).unwrap();
         let path = dir.join("order.xml");
         std::fs::write(&path, "original").unwrap();
-        write_order_file(&path, "<order>replacement</order>").unwrap();
+        write_atomic(&path, "<order>replacement</order>").unwrap();
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
             "<order>replacement</order>"
         );
         let blocked = dir.join("directory.xml");
         std::fs::create_dir(&blocked).unwrap();
-        assert!(write_order_file(&blocked, "invalid destination").is_err());
+        assert!(write_atomic(&blocked, "invalid destination").is_err());
         assert!(blocked.is_dir());
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2);
         std::fs::remove_file(path).unwrap();

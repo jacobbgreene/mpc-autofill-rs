@@ -6,6 +6,8 @@
 
 mod artwork;
 mod artwork_thumbnail;
+mod files;
+mod saved_decks;
 mod session;
 
 use std::path::PathBuf;
@@ -179,6 +181,10 @@ fn main() {
         .manage(artwork_thumbnail::ArtworkThumbnails::default())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            app.manage(saved_decks::SavedDecks::new(
+                app.path().app_data_dir()?,
+                app.path().document_dir().ok(),
+            ));
             let (inbox, receiver) = mpsc::channel(16);
             // The actor needs an owned handle to emit events; this is the one
             // framework handle we hand off, moved (not shared) into its task.
@@ -187,7 +193,7 @@ fn main() {
             app.manage(AppState { inbox });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load_order, thumbnails, download, fill, get_decklist, preview_decklist, edit_decklist, save_order, read_decklist, preview_new_decklist, create_order, artwork::search_artwork, artwork_thumbnail::artwork_thumbnail])
+        .invoke_handler(tauri::generate_handler![load_order, thumbnails, download, fill, get_decklist, preview_decklist, edit_decklist, save_order, read_decklist, preview_new_decklist, create_order, artwork::search_artwork, artwork_thumbnail::artwork_thumbnail, saved_decks::list_saved_decks, saved_decks::default_deck_path])
         .build(tauri::generate_context!())
         .expect("failed to start MPC Autofill")
         .run(|app, event| {
