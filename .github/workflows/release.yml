@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_BUILD_JOBS: '2'
+  CARGO_INCREMENTAL: '0'
+  CARGO_PROFILE_DEV_DEBUG: '0'
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            os: ubuntu-22.04
+            bundles: appimage,deb
+          - name: windows-x64
+            os: windows-2022
+            bundles: nsis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2 xdg-utils xvfb dbus-x11 x11-utils
+      - name: Check release version
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: node scripts/check-release-version.mjs
+      - run: npm --prefix frontend ci
+      - run: npm --prefix frontend run check
+      - run: npm --prefix frontend test
+      - run: cargo test --workspace --locked
+      - name: Install Tauri CLI
+        run: npm install --global @tauri-apps/cli@2.11.4
+      - name: Build installers
+        run: tauri build --bundles ${{ matrix.bundles }} -- --locked
+      - name: Smoke test Linux package
+        if: runner.os == 'Linux'
+        run: |
+          package=(target/release/bundle/appimage/*.AppImage)
+          chmod +x "${package[0]}"
+          "${package[0]}" --appimage-extract > /dev/null
+          python3 scripts/smoke-linux.py squashfs-root/AppRun
+      - name: Install and smoke test Windows package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/smoke-windows.ps1
+      - name: Save installers
+        run: node scripts/collect-installers.mjs
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          if-no-files-found: error
+          path: dist/*
+
+  release:
+    name: Create draft release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+      - name: Create checksums and draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        working-directory: installers
+        run: |
+          test "$(find . -name '*.exe' | wc -l)" -eq 1
+          test "$(find . -name '*.AppImage' | wc -l)" -eq 1
+          test "$(find . -name '*.deb' | wc -l)" -eq 1
+          sha256sum ./*.exe ./*.AppImage ./*.deb > SHA256SUMS
+          gh release create "$RELEASE_TAG" ./*.exe ./*.AppImage ./*.deb SHA256SUMS --verify-tag --draft --prerelease --title "MPC Autofill $RELEASE_TAG" --generate-notes

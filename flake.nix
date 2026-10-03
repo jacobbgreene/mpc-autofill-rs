@@ -68,7 +68,7 @@
 
           preFixup = ''
             gappsWrapperArgs+=(
-              --set CHROME "${pkgs.chromium}/bin/chromium"
+              --set-default CHROME "${pkgs.chromium}/bin/chromium"
               --set WEBKIT_DISABLE_DMABUF_RENDERER "1"
               --prefix GIO_EXTRA_MODULES : "${pkgs.glib-networking}/lib/gio/modules"
               --prefix XDG_DATA_DIRS : "${pkgs.gtk3}/share/gsettings-schemas/${pkgs.gtk3.name}:${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}"

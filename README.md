@@ -5,6 +5,71 @@ project editor. It imports a text decklist or an order XML, downloads the card i
 visible Chrome via the Chrome DevTools Protocol to build the project — all from a
 single window.
 
+## Installing a release
+
+Download the package for your computer from
+[GitHub Releases](https://github.com/jacobbgreene/mpc-autofill-rs/releases).
+These initial preview builds target 64-bit Intel/AMD computers:
+
+- **Windows 10/11:** run the `-setup.exe` installer. It installs WebView2 if
+  necessary. The installer is currently unsigned.
+- **Linux:** make the `.AppImage` executable and run it, or install the `.deb`
+  with your distribution's package manager. The Linux packages are built on
+  Ubuntu 22.04; other distributions still need compatibility testing.
+- **NixOS:** use the native Nix package described below.
+
+Install Google Chrome or Chromium separately for browser automation. You do not
+need Rust, Node, or a development server to run the release packages. Autofill
+uses its own browser profile, so your normal browser login is separate.
+The repository is private: download links require repository access, or the
+owner can send you the installer file directly.
+
+## Choosing the browser
+
+Set `CHROME` to the full path of your preferred browser before starting the app.
+On this NixOS installation, build and launch with Google Chrome using:
+
+```sh
+nix build .#default
+CHROME=/run/current-system/sw/bin/google-chrome-stable ./result/bin/mpc-autofill
+```
+
+The Nix package defaults to its bundled Chromium when `CHROME` is unset. Windows
+and ordinary Linux packages detect an installed browser when it is unset.
+Close the app before changing browsers. For development on NixOS, override the
+variable **inside** the development environment:
+
+```sh
+nix develop --command env CHROME=/run/current-system/sw/bin/google-chrome-stable cargo-tauri dev
+```
+
+## Building release packages
+
+The `Release` GitHub Actions workflow checks the frontend and Rust workspace,
+builds a Windows NSIS installer plus Linux AppImage and Debian packages, and
+checks that the packaged applications start. Windows is tested after a silent
+installation; the Linux AppImage is extracted and started on a private display.
+These checks do not exercise a signed-in MakePlayingCards upload.
+
+Push a tag matching the versions in `Cargo.toml`, `src-tauri/tauri.conf.json`, and
+`frontend/package.json` (for example, `v0.1.0`). Both platforms must pass before
+the workflow creates a draft preview release with installers and SHA-256
+checksums. Review the assets and publish the draft to share it. A manual workflow
+run on a branch builds downloadable workflow artifacts without creating a release.
+
+To reproduce packaging on a machine with
+[Tauri's prerequisites](https://v2.tauri.app/start/prerequisites/) installed:
+
+```sh
+npm --prefix frontend ci
+npm install --global @tauri-apps/cli@2.11.4
+tauri build --bundles nsis -- --locked          # Windows
+tauri build --bundles appimage,deb -- --locked  # Linux
+```
+
+The icon uses the same card symbol as the application header. Regenerate its
+platform variants with `cargo-tauri icon src-tauri/icons/icon.svg`.
+
 This is a from-scratch reimagining of the reference Python desktop tool, focused
 on a smoother, one-window experience.
 
