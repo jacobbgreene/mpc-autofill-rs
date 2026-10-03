@@ -61,14 +61,14 @@ impl Cardstock {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Details {
     pub quantity: u32,
     pub stock: Cardstock,
     pub foil: bool,
 }
 
-#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Card {
     pub drive_id: String,
     pub source: Source,
@@ -88,7 +88,7 @@ impl Card {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Order {
     pub name: String,
     pub details: Details,
@@ -113,17 +113,22 @@ impl Order {
     pub fn from_xml(name: &str, xml: &str) -> Result<Order> {
         let raw: RawOrder = quick_xml::de::from_str(xml)?;
 
-        let quantity: u32 = raw
-            .details
-            .quantity
-            .trim()
-            .parse()
-            .map_err(|_| Error::Invalid(format!("quantity '{}' is not a number", raw.details.quantity)))?;
-        let stock = Cardstock::parse(raw.details.stock.trim())
-            .ok_or_else(|| Error::Invalid(format!("unsupported cardstock '{}'", raw.details.stock)))?;
+        let quantity: u32 = raw.details.quantity.trim().parse().map_err(|_| {
+            Error::Invalid(format!(
+                "quantity '{}' is not a number",
+                raw.details.quantity
+            ))
+        })?;
+        let stock = Cardstock::parse(raw.details.stock.trim()).ok_or_else(|| {
+            Error::Invalid(format!("unsupported cardstock '{}'", raw.details.stock))
+        })?;
         let foil = raw.details.foil.trim() == "true";
 
-        let details = Details { quantity, stock, foil };
+        let details = Details {
+            quantity,
+            stock,
+            foil,
+        };
         let cardback_id = raw
             .cardback
             .as_deref()
@@ -132,12 +137,18 @@ impl Order {
         let fronts = merge_cards(raw.fronts.cards);
         let backs = build_backs(raw.backs.cards, cardback_id.as_deref(), quantity);
 
-        let order = Order { name: name.to_owned(), details, fronts, backs, cardback_id };
+        let order = Order {
+            name: name.to_owned(),
+            details,
+            fronts,
+            backs,
+            cardback_id,
+        };
         order.validate()?;
         Ok(order)
     }
 
-    fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         if self.details.quantity == 0 {
             return Err(Error::Invalid("order has no cards".into()));
         }
@@ -162,6 +173,47 @@ impl Order {
         let backs = self.backs.iter().map(|card| (Face::Back, card));
         fronts.chain(backs)
     }
+
+    pub fn to_xml(&self) -> Result<String> {
+        self.validate()?;
+        let face = |cards: &[Card]| RawFace {
+            cards: cards
+                .iter()
+                .map(|card| RawCard {
+                    id: card.drive_id.clone(),
+                    slots: card
+                        .slots
+                        .iter()
+                        .map(u32::to_string)
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    name: card.name.clone(),
+                    query: card.query.clone(),
+                    source_type: Some(
+                        match card.source {
+                            Source::GoogleDrive => "Google Drive",
+                            Source::LocalFile => "Local File",
+                        }
+                        .into(),
+                    ),
+                })
+                .collect(),
+        };
+        let raw = RawOrder {
+            details: RawDetails {
+                quantity: self.details.quantity.to_string(),
+                stock: self.details.stock.label().into(),
+                foil: self.details.foil.to_string(),
+            },
+            fronts: face(&self.fronts),
+            backs: face(&self.backs),
+            cardback: self.cardback_id.clone(),
+        };
+        let xml = quick_xml::se::to_string(&raw).map_err(|e| Error::Invalid(e.to_string()))?;
+        Ok(format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n{xml}\n"
+        ))
+    }
 }
 
 /// Merge cards that share a Drive id into one, unioning their slot assignments and
@@ -176,7 +228,10 @@ fn merge_cards(raw: Vec<RawCard>) -> Vec<Card> {
         };
         let drive_id = card.id.trim_matches(|c| c == ' ' || c == '"').to_owned();
 
-        match cards.iter_mut().find(|existing| existing.drive_id == drive_id) {
+        match cards
+            .iter_mut()
+            .find(|existing| existing.drive_id == drive_id)
+        {
             Some(existing) => existing.slots.extend(slots),
             None => cards.push(Card {
                 drive_id,
@@ -197,16 +252,25 @@ fn build_backs(raw: Vec<RawCard>, cardback: Option<&str>, quantity: u32) -> Vec<
 
     let cardback_id = cardback.map(|id| id.trim_matches(|c| c == ' ' || c == '"'));
     if let Some(cardback_id) = cardback_id.filter(|id| !id.is_empty()) {
-        let covered: BTreeSet<u32> = backs.iter().flat_map(|card| card.slots.iter().copied()).collect();
-        let missing: BTreeSet<u32> = (0..quantity).filter(|slot| !covered.contains(slot)).collect();
+        let covered: BTreeSet<u32> = backs
+            .iter()
+            .flat_map(|card| card.slots.iter().copied())
+            .collect();
+        let missing: BTreeSet<u32> = (0..quantity)
+            .filter(|slot| !covered.contains(slot))
+            .collect();
         if !missing.is_empty() {
-            backs.push(Card {
-                drive_id: cardback_id.to_owned(),
-                source: Source::GoogleDrive,
-                slots: missing,
-                name: None,
-                query: None,
-            });
+            if let Some(existing) = backs.iter_mut().find(|card| card.drive_id == cardback_id) {
+                existing.slots.extend(missing);
+            } else {
+                backs.push(Card {
+                    drive_id: cardback_id.to_owned(),
+                    source: Source::GoogleDrive,
+                    slots: missing,
+                    name: None,
+                    query: None,
+                });
+            }
         }
     }
     backs
@@ -222,24 +286,25 @@ fn parse_slots(text: &str) -> BTreeSet<u32> {
 
 // region raw XML shapes
 
-#[derive(Deserialize)]
+#[derive(Deserialize, serde::Serialize)]
+#[serde(rename = "order")]
 struct RawOrder {
     details: RawDetails,
     #[serde(default)]
     fronts: RawFace,
     #[serde(default)]
     backs: RawFace,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     cardback: Option<String>,
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, serde::Serialize, Default)]
 struct RawFace {
     #[serde(default, rename = "card")]
     cards: Vec<RawCard>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, serde::Serialize)]
 struct RawDetails {
     quantity: String,
     stock: String,
@@ -247,16 +312,20 @@ struct RawDetails {
     foil: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, serde::Serialize)]
 struct RawCard {
     id: String,
     #[serde(default)]
     slots: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     name: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     query: Option<String>,
-    #[serde(default, rename = "sourceType")]
+    #[serde(
+        default,
+        rename = "sourceType",
+        skip_serializing_if = "Option::is_none"
+    )]
     source_type: Option<String>,
 }
 
@@ -298,14 +367,22 @@ mod tests {
     fn merges_cards_sharing_a_drive_id() {
         let order = Order::from_xml("sample", SAMPLE).unwrap();
         assert_eq!(order.fronts.len(), 2);
-        let ace = order.fronts.iter().find(|c| c.drive_id == "front_a").unwrap();
+        let ace = order
+            .fronts
+            .iter()
+            .find(|c| c.drive_id == "front_a")
+            .unwrap();
         assert_eq!(ace.slots, BTreeSet::from([0, 2]));
     }
 
     #[test]
     fn fills_uncovered_back_slots_with_the_common_cardback() {
         let order = Order::from_xml("sample", SAMPLE).unwrap();
-        let common = order.backs.iter().find(|c| c.drive_id == "common_back").unwrap();
+        let common = order
+            .backs
+            .iter()
+            .find(|c| c.drive_id == "common_back")
+            .unwrap();
         // slot 0 is taken by the explicit back; slots 1 and 2 fall back to the common cardback.
         assert_eq!(common.slots, BTreeSet::from([1, 2]));
     }
@@ -320,6 +397,36 @@ mod tests {
     #[test]
     fn rejects_oversized_orders() {
         let xml = SAMPLE.replace("<quantity>3</quantity>", "<quantity>700</quantity>");
-        assert!(matches!(Order::from_xml("big", &xml), Err(Error::Invalid(_))));
+        assert!(matches!(
+            Order::from_xml("big", &xml),
+            Err(Error::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn xml_round_trip_preserves_artwork_backs_and_escaped_names() {
+        let mut order = Order::from_xml("sample", SAMPLE).unwrap();
+        order.fronts[0].name = Some("Fire & Ice <alternate>.png".into());
+        order.fronts[0].source = Source::LocalFile;
+        order.fronts[0].drive_id = "/tmp/Fire & Ice.png".into();
+        assert_eq!(
+            Order::from_xml("sample", &order.to_xml().unwrap()).unwrap(),
+            order
+        );
+    }
+
+    #[test]
+    fn explicit_common_back_and_fallback_slots_share_one_image() {
+        let order = Order::from_xml(
+            "sample",
+            &SAMPLE.replace("<id>back_x</id>", "<id>common_back</id>"),
+        )
+        .unwrap();
+        assert_eq!(order.backs.len(), 1);
+        assert_eq!(order.backs[0].slots, BTreeSet::from([0, 1, 2]));
+        assert_eq!(
+            Order::from_xml("sample", &order.to_xml().unwrap()).unwrap(),
+            order
+        );
     }
 }

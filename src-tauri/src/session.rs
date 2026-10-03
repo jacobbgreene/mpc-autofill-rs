@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use autofill_automation::{Driver, Error as AutomationError, ImageMode};
+use autofill_core::decklist::{ArtworkSelection, DecklistPreview};
 use autofill_core::{download, DownloadJob, DownloadOutcome, Face, Order, PostProcess, Source};
 use futures::stream::{self, StreamExt};
 use serde::Serialize;
@@ -27,6 +28,23 @@ pub enum Command {
     LoadThumbnails {
         reply: Reply<()>,
     },
+    GetDecklist {
+        reply: Reply<String>,
+    },
+    PreviewDecklist {
+        text: String,
+        selections: Vec<ArtworkSelection>,
+        reply: Reply<DecklistPreview>,
+    },
+    EditDecklist {
+        text: String,
+        selections: Vec<ArtworkSelection>,
+        reply: Reply<OrderSummary>,
+    },
+    SaveOrder {
+        path: Option<PathBuf>,
+        reply: Reply<OrderSummary>,
+    },
     Download {
         reply: Reply<()>,
     },
@@ -45,6 +63,8 @@ pub struct OrderSummary {
     pub stock: String,
     pub foil: bool,
     pub cards: Vec<CardView>,
+    pub path: String,
+    pub dirty: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -69,6 +89,7 @@ struct DownloadEvent {
 #[derive(Serialize, Clone)]
 struct CardStatusEvent {
     drive_id: String,
+    face: &'static str,
     status: &'static str,
 }
 
@@ -95,6 +116,42 @@ pub async fn run(mut inbox: mpsc::Receiver<Command>, app: AppHandle) {
                 session.spawn_thumbnail_fetch();
                 let _ = reply.send(Ok(()));
             }
+            Command::GetDecklist { reply } => {
+                let _ = reply.send(
+                    session
+                        .order
+                        .as_ref()
+                        .ok_or_else(|| "no order loaded".to_owned())
+                        .and_then(|order| order.to_decklist().map_err(|e| e.to_string())),
+                );
+            }
+            Command::PreviewDecklist {
+                text,
+                selections,
+                reply,
+            } => {
+                let _ = reply.send(
+                    session
+                        .order
+                        .as_ref()
+                        .ok_or_else(|| "no order loaded".to_owned())
+                        .and_then(|order| {
+                            order
+                                .preview_decklist(&text, &selections)
+                                .map_err(|e| e.to_string())
+                        }),
+                );
+            }
+            Command::EditDecklist {
+                text,
+                selections,
+                reply,
+            } => {
+                let _ = reply.send(session.edit_decklist(&text, &selections));
+            }
+            Command::SaveOrder { path, reply } => {
+                let _ = reply.send(session.save_order(path).await);
+            }
             Command::Download { reply } => {
                 let _ = reply.send(session.download().await);
             }
@@ -118,6 +175,8 @@ struct Session {
     downloaded: HashMap<String, PathBuf>,
     driver: Option<Driver>,
     post: Option<PostProcess>,
+    order_path: PathBuf,
+    dirty: bool,
 }
 
 impl Session {
@@ -129,6 +188,8 @@ impl Session {
             downloaded: HashMap::new(),
             driver: None,
             post: Some(PostProcess::default()),
+            order_path: PathBuf::new(),
+            dirty: false,
         }
     }
 
@@ -146,6 +207,14 @@ impl Session {
             .allow_directory(&self.cards_dir, true);
         self.downloaded.clear();
 
+        self.order_path = path;
+        self.dirty = false;
+        self.order = Some(order);
+        self.summary()
+    }
+
+    fn summary(&self) -> Result<OrderSummary, String> {
+        let order = self.order.as_ref().ok_or("no order loaded")?;
         let cardback_id = order.cardback_id.as_deref();
         let cards = order
             .images()
@@ -163,10 +232,59 @@ impl Session {
             stock: order.details.stock.label().to_owned(),
             foil: order.details.foil,
             cards,
+            path: self.order_path.to_string_lossy().into_owned(),
+            dirty: self.dirty,
         };
 
-        self.order = Some(order);
         Ok(summary)
+    }
+
+    fn edit_decklist(
+        &mut self,
+        text: &str,
+        selections: &[ArtworkSelection],
+    ) -> Result<OrderSummary, String> {
+        let edited = self
+            .order
+            .as_ref()
+            .ok_or("no order loaded")?
+            .edit_decklist(text, selections)
+            .map_err(|e| e.to_string())?;
+        self.dirty |= self.order.as_ref() != Some(&edited);
+        self.order = Some(edited);
+        self.downloaded.clear();
+        self.summary()
+    }
+
+    async fn save_order(&mut self, path: Option<PathBuf>) -> Result<OrderSummary, String> {
+        let path = path.unwrap_or_else(|| self.order_path.clone());
+        if path
+            .extension()
+            .and_then(|s| s.to_str())
+            .is_none_or(|s| !s.eq_ignore_ascii_case("xml"))
+        {
+            return Err("save the order with an .xml extension".into());
+        }
+        let xml = self
+            .order
+            .as_ref()
+            .ok_or("no order loaded")?
+            .to_xml()
+            .map_err(|e| e.to_string())?;
+        let dest = path.clone();
+        tokio::task::spawn_blocking(move || write_order_file(&dest, &xml))
+            .await
+            .map_err(|e| e.to_string())??;
+        if let Some(order) = self.order.as_mut() {
+            order.name = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("Project")
+                .into();
+        }
+        self.order_path = path;
+        self.dirty = false;
+        self.summary()
     }
 
     async fn download(&mut self) -> Result<(), String> {
@@ -294,16 +412,16 @@ impl Session {
     ) -> Result<(), String> {
         for (_, card) in order.images().filter(|(f, _)| *f == face) {
             let Some(path) = self.downloaded.get(&card.drive_id) else {
-                self.emit_card(&card.drive_id, "skipped");
+                self.emit_card(&card.drive_id, face, "skipped");
                 continue;
             };
-            self.emit_card(&card.drive_id, "uploading");
+            self.emit_card(&card.drive_id, face, "uploading");
             let slots = effective_slots(face, back_mode, &card.slots);
             driver
                 .upload_and_insert(path, &slots)
                 .await
                 .map_err(|e| e.to_string())?;
-            self.emit_card(&card.drive_id, "inserted");
+            self.emit_card(&card.drive_id, face, "inserted");
         }
         Ok(())
     }
@@ -320,7 +438,9 @@ impl Session {
         let Some(order) = self.order.as_ref() else {
             return;
         };
-        let thumbs_dir = self.cards_dir.join("thumbs");
+        // Keep larger previews separate from the older 160px cache. Otherwise
+        // cached thumbnails would remain blurry in the expanded card dialog.
+        let thumbs_dir = self.cards_dir.join("thumbs").join("640");
 
         let mut seen = HashSet::new();
         let jobs: Vec<ThumbJob> = order
@@ -329,7 +449,7 @@ impl Session {
             .filter(|(_, card)| seen.insert(card.drive_id.as_str()))
             .map(|(_, card)| ThumbJob {
                 url: format!(
-                    "https://drive.google.com/thumbnail?id={}&sz=w256",
+                    "https://drive.google.com/thumbnail?id={}&sz=w640",
                     card.drive_id
                 ),
                 path: thumbs_dir.join(format!("{}.jpg", card.drive_id)),
@@ -345,15 +465,40 @@ impl Session {
         let _ = self.app.emit("phase", PhaseEvent { phase });
     }
 
-    fn emit_card(&self, drive_id: &str, status: &'static str) {
+    fn emit_card(&self, drive_id: &str, face: Face, status: &'static str) {
         let _ = self.app.emit(
             "card-status",
             CardStatusEvent {
                 drive_id: drive_id.to_owned(),
+                face: face_name(face),
                 status,
             },
         );
     }
+}
+
+fn write_order_file(path: &std::path::Path, xml: &str) -> Result<(), String> {
+    use std::io::Write;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_nanos();
+    let temporary = path.with_file_name(format!(".mpc-order-{}-{stamp}.tmp", std::process::id()));
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .map_err(|e| e.to_string())?;
+    let result = (|| {
+        file.write_all(xml.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&temporary, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result.map_err(|e| e.to_string())
 }
 
 /// A common back can use the editor's Same mode only when it is the sole back
@@ -442,6 +587,32 @@ mod tests {
             slots
         );
     }
+
+    #[test]
+    fn saving_replaces_complete_xml_and_cleans_up_failed_writes() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("mpc-save-test-{}-{stamp}", std::process::id()));
+        std::fs::create_dir(&dir).unwrap();
+        let path = dir.join("order.xml");
+        std::fs::write(&path, "original").unwrap();
+        write_order_file(&path, "<order>replacement</order>").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "<order>replacement</order>"
+        );
+        let blocked = dir.join("directory.xml");
+        std::fs::create_dir(&blocked).unwrap();
+        assert!(write_order_file(&blocked, "invalid destination").is_err());
+        assert!(blocked.is_dir());
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2);
+        std::fs::remove_file(path).unwrap();
+        std::fs::remove_dir(blocked).unwrap();
+        std::fs::remove_dir(dir).unwrap();
+    }
 }
 
 fn face_name(face: Face) -> &'static str {
@@ -454,7 +625,7 @@ fn face_name(face: Face) -> &'static str {
 /// How many thumbnails to fetch at once. They're small, so we can be generous.
 const THUMBNAIL_CONCURRENCY: usize = 12;
 /// Longest edge of a cached UI thumbnail.
-const THUMBNAIL_EDGE: u32 = 160;
+const THUMBNAIL_EDGE: u32 = 640;
 
 struct ThumbJob {
     drive_id: String,

@@ -50,5 +50,47 @@ app in two shells — `npm --prefix frontend run dev`, then `cargo run -p mpc-au
   account / API key).
 
 Not yet ported from the reference tool: the PrinterStudio sites, append/continue
-to an existing project, order combining/splitting, PDF export, save-to-account,
-and the single-cardback "same image" upload optimisation.
+to an existing project, order combining/splitting, PDF export, and save-to-account.
+
+## Working with an order
+
+Open or drop an order XML to browse its cards. Search by name, filter fronts,
+backs, or images needing attention, and click a card for a larger preview.
+Autofill shows each stage and asks you to sign in in Chrome when necessary.
+Completion reports skipped images so you can check them before placing an order.
+
+**Edit list** opens the current order as text. **Replace deck** starts a new list
+inside the same order. Both accept pasted text or an imported `.txt` file:
+
+```text
+4 Island
+1 Lightning Bolt
+1 Delver of Secrets | Insectile Aberration
+```
+
+Use one card per line with an optional quantity (`4` or `4x`). Blank lines and
+lines beginning with `#` or `//` are ignored. `Front name | Back name` specifies
+a custom reverse. Existing artwork and back pairings are retained; new names
+must have artwork chosen from the MPC Autofill search results before changes can
+be applied. Use the full artwork name or image ID to distinguish variants with
+the same card name. Each order supports up to 612 cards.
+
+Applying a list updates the loaded order; **Save** writes it back as XML, and
+**Save as…** writes a separate XML. Stock, foil, and the common cardback are
+preserved. The app warns before discarding unsaved changes. Keyboard shortcuts:
+`Ctrl/Cmd+F` searches cards, `Ctrl/Cmd+S` saves, and `Ctrl/Cmd+Shift+S` opens Save As.
+
+Frontend validation (Node 22.6+):
+
+```sh
+npm --prefix frontend run check
+npm --prefix frontend test
+npm --prefix frontend run build
+```
+
+The normal Rust suite runs offline with `nix develop --command cargo test --workspace`.
+An optional live artwork-search check is available with:
+
+```sh
+nix develop --command cargo test -p mpc-autofill live_artwork_search_returns_selectable_drive_images -- --ignored
+```

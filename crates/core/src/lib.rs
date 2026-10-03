@@ -3,6 +3,7 @@
 //! any GUI or browser-automation dependencies so it compiles and tests quickly.
 
 pub mod download;
+pub mod decklist;
 pub mod image_proc;
 pub mod order;
 

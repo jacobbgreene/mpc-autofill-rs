@@ -4,11 +4,13 @@
 //! to the session actor (see [`session`]) and the actor streams progress back to
 //! the frontend as Tauri events.
 
+mod artwork;
 mod session;
 
 use std::path::PathBuf;
 use std::time::Duration;
 
+use autofill_core::decklist::{ArtworkSelection, DecklistPreview};
 use session::{Command, OrderSummary};
 use tauri::{Manager, State};
 use tokio::sync::{mpsc, oneshot};
@@ -26,7 +28,10 @@ impl AppState {
         build: impl FnOnce(oneshot::Sender<Result<T, String>>) -> Command,
     ) -> Result<T, String> {
         let (reply, response) = oneshot::channel();
-        self.inbox.send(build(reply)).await.map_err(|_| "session is not running")?;
+        self.inbox
+            .send(build(reply))
+            .await
+            .map_err(|_| "session is not running")?;
         response.await.map_err(|_| "session dropped the request")?
     }
 }
@@ -34,13 +39,18 @@ impl AppState {
 #[tauri::command]
 async fn load_order(state: State<'_, AppState>, path: String) -> Result<OrderSummary, String> {
     state
-        .request(|reply| Command::LoadOrder { path: PathBuf::from(path), reply })
+        .request(|reply| Command::LoadOrder {
+            path: PathBuf::from(path),
+            reply,
+        })
         .await
 }
 
 #[tauri::command]
 async fn thumbnails(state: State<'_, AppState>) -> Result<(), String> {
-    state.request(|reply| Command::LoadThumbnails { reply }).await
+    state
+        .request(|reply| Command::LoadThumbnails { reply })
+        .await
 }
 
 #[tauri::command]
@@ -51,6 +61,77 @@ async fn download(state: State<'_, AppState>) -> Result<(), String> {
 #[tauri::command]
 async fn fill(state: State<'_, AppState>) -> Result<(), String> {
     state.request(|reply| Command::Fill { reply }).await
+}
+
+#[tauri::command]
+async fn get_decklist(state: State<'_, AppState>) -> Result<String, String> {
+    state.request(|reply| Command::GetDecklist { reply }).await
+}
+
+#[tauri::command]
+async fn preview_decklist(
+    state: State<'_, AppState>,
+    text: String,
+    selections: Vec<ArtworkSelection>,
+) -> Result<DecklistPreview, String> {
+    state
+        .request(|reply| Command::PreviewDecklist {
+            text,
+            selections,
+            reply,
+        })
+        .await
+}
+
+#[tauri::command]
+async fn edit_decklist(
+    state: State<'_, AppState>,
+    text: String,
+    selections: Vec<ArtworkSelection>,
+) -> Result<OrderSummary, String> {
+    state
+        .request(|reply| Command::EditDecklist {
+            text,
+            selections,
+            reply,
+        })
+        .await
+}
+
+#[tauri::command]
+async fn save_order(
+    state: State<'_, AppState>,
+    path: Option<String>,
+) -> Result<OrderSummary, String> {
+    state
+        .request(|reply| Command::SaveOrder {
+            path: path.map(PathBuf::from),
+            reply,
+        })
+        .await
+}
+
+#[tauri::command]
+async fn read_decklist(path: String) -> Result<String, String> {
+    let path = PathBuf::from(path);
+    if path
+        .extension()
+        .and_then(|s| s.to_str())
+        .is_none_or(|s| !s.eq_ignore_ascii_case("txt"))
+    {
+        return Err("choose a .txt decklist".into());
+    }
+    if tokio::fs::metadata(&path)
+        .await
+        .map_err(|e| e.to_string())?
+        .len()
+        > 1_000_000
+    {
+        return Err("decklist is too large; use a text file under 1 MB".into());
+    }
+    tokio::fs::read_to_string(path)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Longest the exit path waits for the actor to close the browser. The actor
@@ -75,7 +156,7 @@ fn main() {
             app.manage(AppState { inbox });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load_order, thumbnails, download, fill])
+        .invoke_handler(tauri::generate_handler![load_order, thumbnails, download, fill, get_decklist, preview_decklist, edit_decklist, save_order, read_decklist, artwork::search_artwork])
         .build(tauri::generate_context!())
         .expect("failed to start MPC Autofill")
         .run(|app, event| {

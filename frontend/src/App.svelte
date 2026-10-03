@@ -1,272 +1,593 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { invoke, convertFileSrc } from "@tauri-apps/api/core";
-  import { listen } from "@tauri-apps/api/event";
-  import { open } from "@tauri-apps/plugin-dialog";
-
-  type Status =
-    | "pending"
-    | "downloaded"
-    | "download-failed"
-    | "uploading"
-    | "inserted"
-    | "skipped";
-
-  type Card = {
-    face: "front" | "back";
-    drive_id: string;
-    name: string;
-    slots: number[];
-    cardback: boolean;
-    thumb?: string;
-    status: Status;
-    error?: string;
-  };
-
-  type OrderSummary = {
-    name: string;
-    quantity: number;
-    stock: string;
-    foil: boolean;
-    cards: Omit<Card, "status">[];
-  };
+  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+  import { getCurrentWebview } from "@tauri-apps/api/webview";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { open, save, confirm } from "@tauri-apps/plugin-dialog";
+  import Icon from "./lib/Icon.svelte";
+  import CardTile from "./lib/CardTile.svelte";
+  import CardPreview from "./lib/CardPreview.svelte";
+  import ProgressPanel from "./lib/ProgressPanel.svelte";
+  import DeckEditor from "./lib/DeckEditor.svelte";
+  import {
+    cardKey,
+    displayName,
+    filterCards,
+    needsAttention,
+    patchCards,
+    type Card,
+    type Face,
+    type Filter,
+    type OrderSummary,
+    type Status,
+  } from "./lib/order";
 
   let summary: OrderSummary | null = null;
   let cards: Card[] = [];
   let phase = "";
   let busy = false;
+  let connected = false;
   let error = "";
-  // Download events do not include a total, but the loaded order does. Keep
-  // this separately from card status because later upload events replace it.
+  let orderError = "";
+  let previewError = "";
+  let dragging = false;
+  let query = "";
+  let filter: Filter = "all";
+  let selectedKey: string | null = null;
   let downloadCompleted = 0;
   let downloadFailures = 0;
+  let searchInput: HTMLInputElement;
+  let editorMode: "edit" | "replace" | null = null;
+  let savedMessage = "";
+  let running = false;
+  let closing = false;
 
-  const PHASE_LABELS: Record<string, string> = {
-    downloading: "Downloading card images…",
-    "awaiting-sign-in": "Waiting for you to sign in to MakePlayingCards…",
-    configuring: "Configuring the project…",
-    "uploading-fronts": "Uploading card fronts…",
-    "paging-to-backs": "Moving to card backs…",
-    "uploading-backs": "Uploading card backs…",
-    "paging-to-review": "Moving to project review…",
-    done: "Done — review your project in the browser.",
-  };
+  const filters: { value: Filter; label: string }[] = [
+    { value: "all", label: "All cards" },
+    { value: "front", label: "Fronts" },
+    { value: "back", label: "Backs" },
+    { value: "attention", label: "Needs attention" },
+  ];
+  $: cardbacks = cards.filter((card) => card.cardback);
+  $: attentionCount = cards.filter(needsAttention).length;
+  $: visibleCards = filterCards(cards, filter, query);
+  $: selectedCard = cards.find((card) => cardKey(card) === selectedKey) ?? null;
 
-  $: cardbacks = cards.filter((c) => c.cardback);
-  $: mainCards = cards.filter((c) => !c.cardback);
-  $: downloaded = cards.filter((c) => c.status !== "pending" && c.status !== "download-failed").length;
-  $: failed = cards.filter((c) => c.status === "download-failed").length;
-
-  // Progress events can arrive in a burst (one per image); coalesce them and
-  // rebuild `cards` at most once per animation frame so the grid never thrashes.
-  let pending = new Map<string, Partial<Card>>();
-  let flushScheduled = false;
-
+  // Coalesce event bursts without conflating a front's placement with its back.
+  let pending: { driveId: string; change: Partial<Card>; face?: Face }[] = [];
+  let frame: number | null = null;
   function flush() {
-    flushScheduled = false;
-    const changes = pending;
-    pending = new Map();
-    cards = cards.map((c) => {
-      const change = changes.get(c.drive_id);
-      return change ? { ...c, ...change } : c;
-    });
+    frame = null;
+    for (const update of pending)
+      cards = patchCards(cards, update.driveId, update.change, update.face);
+    pending = [];
   }
-
-  // A Drive id can appear on both a front and a back, so a change applies to
-  // every card that shares it.
-  function patch(driveId: string, change: Partial<Card>) {
-    const prev = pending.get(driveId);
-    pending.set(driveId, prev ? { ...prev, ...change } : change);
-    if (!flushScheduled) {
-      flushScheduled = true;
-      requestAnimationFrame(flush);
-    }
+  function patch(driveId: string, change: Partial<Card>, face?: Face) {
+    pending.push({ driveId, change, face });
+    if (frame === null) frame = requestAnimationFrame(flush);
   }
 
   onMount(() => {
-    const unlisten = [
-      listen<{ drive_id: string; ok: boolean; error?: string }>(
-        "download-progress",
-        (event) => {
-          const { drive_id, ok, error } = event.payload;
-          downloadCompleted = Math.min(cards.length, downloadCompleted + 1);
-          if (!ok) downloadFailures += 1;
-          patch(drive_id, {
-            status: ok ? "downloaded" : "download-failed",
-            error: ok ? undefined : error,
-          });
-        },
-      ),
-      listen<{ phase: string }>("phase", (event) => {
-        phase = event.payload.phase;
-        if (phase === "downloading") {
-          downloadCompleted = 0;
-          downloadFailures = 0;
-        }
-      }),
-      listen<{ drive_id: string; status: Status }>("card-status", (event) => {
-        patch(event.payload.drive_id, { status: event.payload.status });
-      }),
-      listen<{ drive_id: string; path: string }>("thumb-ready", (event) => {
-        patch(event.payload.drive_id, { thumb: convertFileSrc(event.payload.path) });
-      }),
-    ];
-    return () => unlisten.forEach((p) => p.then((off) => off()));
+    let disposed = false;
+    const unlisteners: UnlistenFn[] = [];
+    async function register(subscription: Promise<UnlistenFn>) {
+      const off = await subscription;
+      if (disposed) off();
+      else unlisteners.push(off);
+    }
+    async function connect() {
+      try {
+        await Promise.all([
+          register(
+            listen<{ drive_id: string; ok: boolean; error?: string }>(
+              "download-progress",
+              ({ payload }) => {
+                downloadCompleted = Math.min(
+                  cards.length,
+                  downloadCompleted + 1,
+                );
+                if (!payload.ok) downloadFailures += 1;
+                patch(payload.drive_id, {
+                  status: payload.ok ? "downloaded" : "download-failed",
+                  error: payload.ok ? undefined : payload.error,
+                });
+              },
+            ),
+          ),
+          register(
+            listen<{ phase: string }>("phase", ({ payload }) => {
+              phase = payload.phase;
+              if (phase === "downloading") {
+                downloadCompleted = 0;
+                downloadFailures = 0;
+              }
+            }),
+          ),
+          register(
+            listen<{ drive_id: string; face: Face; status: Status }>(
+              "card-status",
+              ({ payload }) => {
+                patch(
+                  payload.drive_id,
+                  { status: payload.status },
+                  payload.face,
+                );
+              },
+            ),
+          ),
+          register(
+            listen<{ drive_id: string; path: string }>(
+              "thumb-ready",
+              ({ payload }) => {
+                patch(payload.drive_id, {
+                  thumb: convertFileSrc(payload.path),
+                });
+              },
+            ),
+          ),
+          register(
+            getCurrentWebview().onDragDropEvent(({ payload }) => {
+              if (busy || editorMode) return;
+              if (payload.type === "enter" || payload.type === "over")
+                dragging = true;
+              else dragging = false;
+              if (payload.type === "drop") {
+                if (
+                  payload.paths.length !== 1 ||
+                  !payload.paths[0].toLowerCase().endsWith(".xml")
+                ) {
+                  orderError = "Choose one order XML file at a time.";
+                  return;
+                }
+                void loadOrder(payload.paths[0]);
+              }
+            }),
+          ),
+          register(
+            getCurrentWindow().onCloseRequested(async (event) => {
+              if (closing || (!summary?.dirty && !editorMode)) return;
+              event.preventDefault();
+              if (
+                await confirm(
+                  "Close without saving your order or draft edits?",
+                  { title: "Unsaved changes", kind: "warning" },
+                )
+              ) {
+                closing = true;
+                await getCurrentWindow().close();
+              }
+            }),
+          ),
+        ]);
+        if (!disposed) connected = true;
+      } catch (e) {
+        if (!disposed)
+          orderError = `Could not connect to the desktop app: ${String(e)}`;
+      }
+    }
+    void connect();
+    return () => {
+      disposed = true;
+      unlisteners.forEach((off) => off());
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
   });
 
-  async function openOrder() {
-    error = "";
-    const path = await open({
-      multiple: false,
-      filters: [{ name: "Order XML", extensions: ["xml"] }],
-    });
-    if (typeof path !== "string") return;
-
+  async function loadOrder(path: string) {
+    if (busy || !connected) return;
+    busy = true;
+    orderError = "";
+    dragging = false;
     try {
-      busy = true;
-      summary = await invoke<OrderSummary>("load_order", { path });
-      cards = summary.cards.map((c) => ({ ...c, status: "pending" }));
+      if (
+        summary?.dirty &&
+        !(await confirm(
+          "Open another order and discard your unsaved changes?",
+          { title: "Unsaved changes", kind: "warning" },
+        ))
+      )
+        return;
+      const loaded = await invoke<OrderSummary>("load_order", { path });
+      if (frame !== null) cancelAnimationFrame(frame);
+      frame = null;
+      pending = [];
+      summary = loaded;
+      cards = loaded.cards.map((card) => ({ ...card, status: "pending" }));
       phase = "";
+      error = "";
+      previewError = "";
       downloadCompleted = 0;
       downloadFailures = 0;
-      // Fire-and-forget: backend fetches + caches thumbnails and streams them
-      // back via "thumb-ready" events.
-      invoke("thumbnails").catch(() => {});
+      query = "";
+      filter = "all";
+      selectedKey = null;
+      savedMessage = "";
+      invoke("thumbnails").catch(() => {
+        // A thumbnail failure does not prevent full image downloads or autofill.
+        if (summary === loaded)
+          previewError =
+            "Card previews could not be loaded. You can still start autofill.";
+      });
     } catch (e) {
-      error = String(e);
+      orderError = `Could not open this order: ${String(e)}`;
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function openOrder() {
+    if (busy || !connected) return;
+    busy = true;
+    orderError = "";
+    try {
+      const path = await open({
+        multiple: false,
+        filters: [{ name: "Order XML", extensions: ["xml"] }],
+      });
+      busy = false;
+      if (typeof path === "string") await loadOrder(path);
+    } catch (e) {
+      orderError = `Could not open the file picker: ${String(e)}`;
     } finally {
       busy = false;
     }
   }
 
   async function fill() {
+    if (busy || !summary || !connected) return;
+    busy = true;
+    running = true;
+    error = "";
+    phase = "downloading";
+    downloadCompleted = 0;
+    downloadFailures = 0;
+    flush();
+    cards = cards.map((card) => ({
+      ...card,
+      status: "pending",
+      error: undefined,
+    }));
     try {
-      busy = true;
-      error = "";
-      // Show an indeterminate state immediately; the backend's phase event
-      // follows before it starts emitting per-image download progress.
-      phase = "downloading";
-      downloadCompleted = 0;
-      downloadFailures = 0;
       await invoke("fill");
     } catch (e) {
       error = String(e);
     } finally {
       busy = false;
+      running = false;
     }
+  }
+
+  function showAttention() {
+    query = "";
+    filter = "attention";
+    searchInput?.focus();
+  }
+
+  async function saveOrder(saveAs = false) {
+    if (busy || !summary) return;
+    busy = true;
+    orderError = "";
+    savedMessage = "";
+    try {
+      let path: string | null = null;
+      if (saveAs) {
+        path = await save({
+          defaultPath: summary.path,
+          filters: [{ name: "Order XML", extensions: ["xml"] }],
+        });
+        if (!path) return;
+      }
+      summary = await invoke<OrderSummary>("save_order", { path });
+      savedMessage = "Order saved";
+    } catch (e) {
+      orderError = `Could not save this order: ${String(e)}`;
+    } finally {
+      busy = false;
+    }
+  }
+
+  function applyEditedOrder(edited: OrderSummary) {
+    if (frame !== null) cancelAnimationFrame(frame);
+    frame = null;
+    pending = [];
+    const thumbnails = new Map(
+      cards.map((card) => [card.drive_id, card.thumb]),
+    );
+    summary = edited;
+    cards = edited.cards.map((card) => ({
+      ...card,
+      thumb: thumbnails.get(card.drive_id),
+      status: "pending",
+    }));
+    phase = "";
+    error = "";
+    orderError = "";
+    savedMessage = "";
+    previewError = "";
+    downloadCompleted = 0;
+    downloadFailures = 0;
+    query = "";
+    filter = "all";
+    editorMode = null;
+    invoke("thumbnails").catch(
+      () =>
+        (previewError =
+          "Card previews could not be loaded. You can still start autofill."),
+    );
   }
 </script>
 
-<main class="app">
-  <header>
-    <div class="title">
-      <h1>MPC Autofill</h1>
-      {#if summary}
-        <p class="meta">
-          <strong>{summary.name}</strong> · {summary.quantity} cards · {summary.stock}{summary.foil
-            ? " · foil"
-            : ""}
-        </p>
-      {/if}
+<svelte:window
+  on:keydown={(event) => {
+    if (
+      (event.ctrlKey || event.metaKey) &&
+      event.key.toLowerCase() === "s" &&
+      summary &&
+      !editorMode &&
+      !selectedCard
+    ) {
+      event.preventDefault();
+      void saveOrder(event.shiftKey);
+    }
+    if (
+      (event.ctrlKey || event.metaKey) &&
+      event.key.toLowerCase() === "f" &&
+      summary &&
+      !selectedCard &&
+      !editorMode
+    ) {
+      event.preventDefault();
+      searchInput?.focus();
+    }
+  }}
+/>
+
+<div class="app-shell">
+  <header class="app-bar">
+    <div class="brand">
+      <span class="brand-mark"><Icon size={20} /></span><span
+        >MPC <strong>Autofill</strong></span
+      >
     </div>
-    <div class="actions">
-      <button on:click={openOrder} disabled={busy}>Open order…</button>
-      <button class="primary" on:click={fill} disabled={busy || !summary}>
-        Download images & fill order
-      </button>
-    </div>
+    <span class="app-tagline">A little less work. A lot more cards.</span>
+    {#if summary}<div class="file-actions">
+        <span class="save-status" class:unsaved={summary.dirty} role="status"
+          >{summary.dirty ? "Unsaved changes" : savedMessage}</span
+        ><button
+          class="button secondary small"
+          on:click={() => saveOrder()}
+          disabled={busy || !connected}>Save</button
+        ><button
+          class="button secondary small"
+          on:click={() => saveOrder(true)}
+          disabled={busy || !connected}>Save as…</button
+        ><button
+          class="button secondary small"
+          on:click={openOrder}
+          disabled={busy || !connected}
+          ><Icon name="folder" size={16} />Open order</button
+        >
+      </div>{/if}
   </header>
 
-  {#if error}
-    <p class="banner error">{error}</p>
-  {:else if phase === "downloading"}
-    <section class="banner download-progress" aria-live="polite">
-      <div class="download-progress-copy">
-        <span>{PHASE_LABELS.downloading}</span>
-        {#if cards.length}
-          <strong>{downloadCompleted}/{cards.length} images processed</strong>
-        {:else}
-          <strong>No images need downloading</strong>
-        {/if}
-      </div>
-      {#if cards.length}
-        {#if downloadCompleted === 0}
-          <progress
-            class="download-progress-bar"
-            aria-label="Preparing image downloads"
-          />
-        {:else}
-          <progress
-            class="download-progress-bar"
-            value={downloadCompleted}
-            max={cards.length}
-            aria-label={`${downloadCompleted} of ${cards.length} images processed`}
-          />
-        {/if}
-      {/if}
-      {#if downloadFailures}
-        <p class="download-failures">
-          {downloadFailures} download attempt{downloadFailures === 1 ? "" : "s"} failed.
-        </p>
-      {/if}
-    </section>
-  {:else if phase}
-    <p class="banner">
-      {PHASE_LABELS[phase] ?? phase}{downloadFailures
-        ? ` · ${downloadFailures} download attempt${downloadFailures === 1 ? "" : "s"} failed`
-        : ""}
-    </p>
-  {:else if summary}
-    <p class="banner subtle">
-      {downloaded}/{cards.length} images ready{failed ? ` · ${failed} failed` : ""}
-    </p>
-  {/if}
-
-  {#if !summary}
-    <div class="empty">
-      <p>Open an order XML exported from MPC Autofill to begin.</p>
-    </div>
-  {:else}
-    {#if cardbacks.length}
-      <section class="section">
-        <h2 class="section-title">Common cardback</h2>
-        <div class="grid">
-          {#each cardbacks as card (card.face + ":" + card.drive_id)}
-            <figure class="card cardback {card.status}" title={card.error ?? card.name}>
-              <span class="status-dot" />
-              <div class="thumb">
-                {#if card.thumb}
-                  <img src={card.thumb} alt={card.name} loading="lazy" />
-                {:else}
-                  <span class="placeholder">↺</span>
-                {/if}
-                <span class="badge">×{card.slots.length}</span>
-              </div>
-              <figcaption>{card.name}</figcaption>
-            </figure>
-          {/each}
+  <main class:welcome-main={!summary}>
+    {#if orderError}
+      <div class="notice error-notice" role="alert">
+        <Icon name="warning" />
+        <div>
+          <strong>Order unavailable</strong>
+          <p>{orderError}</p>
         </div>
-      </section>
+        <button
+          class="icon-button"
+          aria-label="Dismiss order error"
+          on:click={() => (orderError = "")}
+          ><Icon name="close" size={16} /></button
+        >
+      </div>
     {/if}
 
-    <section class="section">
-      <h2 class="section-title">Cards</h2>
-      <div class="grid">
-        {#each mainCards as card (card.face + ":" + card.drive_id)}
-          <figure class="card {card.status}" title={card.error ?? card.name}>
-            <span class="status-dot" />
-            <div class="thumb">
-              {#if card.thumb}
-                <img src={card.thumb} alt={card.name} loading="lazy" />
-              {:else}
-                <span class="placeholder">{card.face === "front" ? "F" : "B"}</span>
-              {/if}
-              <span class="badge">{card.slots.length}</span>
-            </div>
-            <figcaption>{card.name}</figcaption>
-          </figure>
+    {#if !summary}
+      <section class="welcome" aria-labelledby="welcome-title">
+        <div class="welcome-art" aria-hidden="true">
+          <span class="decor-card card-left"></span><span
+            class="decor-card card-right"
+          ></span><span class="decor-card card-center"><Icon size={46} /></span>
+        </div>
+        <p class="eyebrow">YOUR NEXT DECK STARTS HERE</p>
+        <h1 id="welcome-title">
+          Great cards.<br /><span>Less clicking.</span>
+        </h1>
+        <p class="welcome-description">
+          Bring your order. We’ll prepare the images and<br class="wide-only" /> build
+          your MakePlayingCards project for you.
+        </p>
+        <div class="drop-zone" class:dragging>
+          <span class="drop-icon"><Icon name="import" size={24} /></span>
+          <div>
+            <h2>
+              {dragging ? "Drop your order here" : "Drop an order XML here"}
+            </h2>
+            <p>Exported from MPC Autofill · one file at a time</p>
+          </div>
+          <button
+            class="button primary"
+            on:click={openOrder}
+            disabled={busy || !connected}
+            >{busy ? "Opening…" : "Open order"}<Icon
+              name="arrow"
+              size={16}
+            /></button
+          >
+        </div>
+        <ol class="welcome-steps">
+          <li><span>01</span>Preview your cards</li>
+          <li><span>02</span>Start autofill</li>
+          <li><span>03</span>Review in Chrome</li>
+        </ol>
+      </section>
+    {:else}
+      <section class="order-overview" aria-labelledby="order-title">
+        <div class="order-heading">
+          <p class="eyebrow">YOUR ORDER</p>
+          <h1 id="order-title">{summary.name}</h1>
+          <div class="order-meta">
+            <span><Icon size={14} />{summary.quantity} cards</span><span
+              >{summary.stock}</span
+            ><span>{summary.foil ? "Foil finish" : "Non-foil"}</span>
+          </div>
+        </div>
+        {#each cardbacks as card (cardKey(card))}
+          <button
+            class="common-back"
+            on:click={() => (selectedKey = cardKey(card))}
+            aria-label={`Preview common cardback, ${card.name}`}
+          >
+            <span class="back-mini"
+              >{#if card.thumb}<img src={card.thumb} alt="" />{:else}<Icon
+                  size={22}
+                />{/if}</span
+            >
+            <span
+              ><span class="eyebrow">COMMON BACK</span><strong
+                title={displayName(card)}>{displayName(card)}</strong
+              ><span class="muted"
+                >{card.slots.length} card{card.slots.length === 1
+                  ? ""
+                  : "s"}</span
+              ></span
+            >
+          </button>
         {/each}
-      </div>
-    </section>
-  {/if}
-</main>
+        <div class="start-action">
+          <button
+            class="button primary"
+            on:click={fill}
+            disabled={busy || !connected}
+            ><Icon name={running ? "clock" : "arrow"} size={17} />{running
+              ? "Autofill in progress"
+              : phase === "done"
+                ? "Start new project"
+                : error
+                  ? "Start over"
+                  : "Start autofill"}</button
+          ><span
+            >{phase === "done" || error
+              ? "Creates a new project in Chrome"
+              : "Opens MakePlayingCards in Chrome"}</span
+          >
+        </div>
+      </section>
+
+      <ProgressPanel
+        {cards}
+        {phase}
+        busy={running}
+        {error}
+        {downloadCompleted}
+        {downloadFailures}
+        on:click={showAttention}
+      />
+      {#if error}<details class="notice error-details">
+          <summary>Technical error details</summary>
+          <p>{error}</p>
+        </details>{/if}
+      {#if previewError}<p class="notice">{previewError}</p>{/if}
+
+      <section class="library" aria-labelledby="library-title">
+        <div class="library-heading">
+          <div>
+            <h2 id="library-title">
+              Your cards <span class="count-badge">{cards.length}</span>
+            </h2>
+            <p>Every front, every back. Take a closer look.</p>
+          </div>
+          <label class="search-field"
+            ><Icon name="search" size={17} /><input
+              bind:this={searchInput}
+              bind:value={query}
+              type="search"
+              placeholder="Find a card…"
+              aria-label="Search cards by name"
+            /></label
+          >
+        </div>
+        <div class="library-controls">
+          <div class="filters" aria-label="Filter cards">
+            {#each filters as item}<button
+                class:active={filter === item.value}
+                aria-pressed={filter === item.value}
+                on:click={() => (filter = item.value)}
+                >{item.label}{#if item.value === "attention" && attentionCount}<span
+                    class="filter-count">{attentionCount}</span
+                  >{/if}</button
+              >{/each}
+          </div>
+          <div class="deck-actions">
+            <button
+              class="text-button"
+              disabled={busy}
+              on:click={() => (editorMode = "edit")}>Edit list</button
+            ><button
+              class="text-button"
+              disabled={busy}
+              on:click={() => (editorMode = "replace")}>Replace deck</button
+            ><span class="result-count" aria-live="polite"
+              >{visibleCards.length} images</span
+            >
+          </div>
+        </div>
+        {#if visibleCards.length}
+          <div class="card-grid">
+            {#each visibleCards as card (cardKey(card))}<CardTile
+                {card}
+                on:click={() => (selectedKey = cardKey(card))}
+              />{/each}
+          </div>
+        {:else}
+          <div class="no-results">
+            <Icon
+              name={filter === "attention" && !query ? "check" : "search"}
+              size={28}
+            />
+            <h3>
+              {filter === "attention" && !query
+                ? "Nothing needs attention"
+                : "No matching cards"}
+            </h3>
+            <p>
+              {filter === "attention" && !query
+                ? "Images with download or placement issues will appear here."
+                : "Try a different name or show all cards."}
+            </p>
+            <button
+              class="button secondary small"
+              on:click={() => {
+                query = "";
+                filter = "all";
+              }}>Show all cards</button
+            >
+          </div>
+        {/if}
+      </section>
+      <footer class="library-footer">
+        <Icon size={14} /><span
+          >{summary.quantity} cards · {cards.length} front and back images</span
+        ><span>Made for your next deck.</span>
+      </footer>
+    {/if}
+  </main>
+</div>
+
+{#if dragging && summary}<div class="drop-overlay" role="status">
+    <Icon name="import" size={40} />
+    <h2>Drop an order XML to open it</h2>
+    <p>This will replace the current order.</p>
+  </div>{/if}
+<CardPreview card={selectedCard} on:close={() => (selectedKey = null)} />
+{#if editorMode}<DeckEditor
+    mode={editorMode}
+    on:close={() => (editorMode = null)}
+    on:applied={(event) => applyEditedOrder(event.detail)}
+  />{/if}
