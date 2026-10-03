@@ -6,12 +6,13 @@ export type Status =
   | "uploading"
   | "inserted"
   | "skipped";
-export type Filter = "all" | "front" | "back" | "attention";
+export type Filter = "all" | "back" | "attention";
 
 export type Card = {
   face: Face;
   drive_id: string;
   name: string;
+  query?: string | null;
   slots: number[];
   cardback: boolean;
   thumb?: string;
@@ -66,6 +67,10 @@ export function filterCards(
           : card.face === filter)) &&
       (!search || card.name.toLocaleLowerCase().includes(search)),
   );
+}
+
+export function artworkQuery(card: Card): string {
+  return card.cardback ? "" : card.query?.trim() || displayName(card);
 }
 
 // Downloads and thumbnails are shared by image; placement belongs to one face.

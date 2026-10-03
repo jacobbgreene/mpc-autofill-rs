@@ -103,6 +103,21 @@ async fn edit_decklist(
 }
 
 #[tauri::command]
+async fn change_artwork(
+    state: State<'_, AppState>,
+    drive_id: String,
+    selection: ArtworkSelection,
+) -> Result<OrderSummary, String> {
+    state
+        .request(|reply| Command::ChangeArtwork {
+            drive_id,
+            selection,
+            reply,
+        })
+        .await
+}
+
+#[tauri::command]
 async fn save_order(
     state: State<'_, AppState>,
     path: Option<String>,
@@ -193,7 +208,7 @@ fn main() {
             app.manage(AppState { inbox });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load_order, thumbnails, download, fill, get_decklist, preview_decklist, edit_decklist, save_order, read_decklist, preview_new_decklist, create_order, artwork::search_artwork, artwork_thumbnail::artwork_thumbnail, saved_decks::list_saved_decks, saved_decks::default_deck_path])
+        .invoke_handler(tauri::generate_handler![load_order, thumbnails, download, fill, get_decklist, preview_decklist, edit_decklist, change_artwork, save_order, read_decklist, preview_new_decklist, create_order, artwork::search_artwork, artwork_thumbnail::artwork_thumbnail, saved_decks::list_saved_decks, saved_decks::default_deck_path])
         .build(tauri::generate_context!())
         .expect("failed to start MPC Autofill")
         .run(|app, event| {

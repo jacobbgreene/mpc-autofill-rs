@@ -12,6 +12,7 @@
   import DeckEditor from "./lib/DeckEditor.svelte";
   import ThemePicker from "./lib/ThemePicker.svelte";
   import SavedDecks from "./lib/SavedDecks.svelte";
+  import ChangeArtwork from "./lib/ChangeArtwork.svelte";
   import {
     cardKey,
     displayName,
@@ -39,6 +40,8 @@
   let query = "";
   let filter: Filter = "all";
   let selectedKey: string | null = null;
+  let artworkCard: Card | null = null;
+  let artworkApplying = false;
   let downloadCompleted = 0;
   let downloadFailures = 0;
   let searchInput: HTMLInputElement;
@@ -53,7 +56,6 @@
 
   const filters: { value: Filter; label: string }[] = [
     { value: "all", label: "All cards" },
-    { value: "front", label: "Fronts" },
     { value: "back", label: "Backs" },
     { value: "attention", label: "Needs attention" },
   ];
@@ -145,7 +147,7 @@
           ),
           register(
             getCurrentWebview().onDragDropEvent(({ payload }) => {
-              if (busy || editorMode) return;
+              if (busy || editorMode || artworkCard) return;
               if (payload.type === "enter" || payload.type === "over")
                 dragging = true;
               else dragging = false;
@@ -164,7 +166,11 @@
           ),
           register(
             getCurrentWindow().onCloseRequested(async (event) => {
-              if (closing || (!summary?.dirty && !editorMode)) return;
+              if (
+                closing ||
+                (!summary?.dirty && !editorMode && !artworkApplying)
+              )
+                return;
               event.preventDefault();
               if (
                 await confirm(
@@ -389,7 +395,29 @@
     window.scrollTo({ top: 0 });
   }
 
-  function applyEditedOrder(edited: OrderSummary) {
+  function changeArtwork(card: Card) {
+    if (busy || !connected) return;
+    selectedKey = null;
+    artworkCard = card;
+  }
+
+  async function applyArtworkChange(order: OrderSummary, previewId: string) {
+    const face = artworkCard?.face;
+    applyEditedOrder(order, true);
+    artworkCard = null;
+    // Reuse the gallery's cached image while the order thumbnails refresh.
+    invoke<string>("artwork_thumbnail", { driveId: previewId })
+      .then((path) => patch(previewId, { thumb: convertFileSrc(path) }))
+      .catch(() => {});
+    await tick();
+    document
+      .querySelector<HTMLButtonElement>(
+        `.card-change-art[data-card-key="${CSS.escape(`${face}:${previewId}`)}"]`,
+      )
+      ?.focus({ preventScroll: true });
+  }
+
+  function applyEditedOrder(edited: OrderSummary, keepView = false) {
     if (frame !== null) cancelAnimationFrame(frame);
     frame = null;
     pending = [];
@@ -409,8 +437,10 @@
     previewError = "";
     downloadCompleted = 0;
     downloadFailures = 0;
-    query = "";
-    filter = "all";
+    if (!keepView) {
+      query = "";
+      filter = "all";
+    }
     editorMode = null;
     invoke("thumbnails").catch(
       () =>
@@ -427,6 +457,7 @@
       event.key.toLowerCase() === "s" &&
       summary &&
       !editorMode &&
+      !artworkCard &&
       !selectedCard
     ) {
       event.preventDefault();
@@ -437,6 +468,7 @@
       event.key.toLowerCase() === "f" &&
       summary &&
       !selectedCard &&
+      !artworkCard &&
       !editorMode
     ) {
       event.preventDefault();
@@ -688,7 +720,9 @@
           <div class="card-grid">
             {#each visibleCards as card (cardKey(card))}<CardTile
                 {card}
+                disabled={busy || !connected}
                 on:click={() => (selectedKey = cardKey(card))}
+                on:changeArtwork={(event) => changeArtwork(event.detail)}
               />{/each}
           </div>
         {:else}
@@ -731,7 +765,20 @@
     <h2>Drop a .txt decklist or .xml order</h2>
     <p>Text lists open as a new deck draft.</p>
   </div>{/if}
-<CardPreview card={selectedCard} on:close={() => (selectedKey = null)} />
+<CardPreview
+  card={selectedCard}
+  editable
+  disabled={busy || !connected}
+  on:close={() => (selectedKey = null)}
+  on:changeArtwork={(event) => changeArtwork(event.detail)}
+/>
+{#if artworkCard}<ChangeArtwork
+    card={artworkCard}
+    bind:applying={artworkApplying}
+    on:close={() => (artworkCard = null)}
+    on:applied={(event) =>
+      applyArtworkChange(event.detail.order, event.detail.previewId)}
+  />{/if}
 {#if editorMode}<DeckEditor
     mode={editorMode}
     initialText={editorMode === "create" ? draftText : ""}

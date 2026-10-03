@@ -2,6 +2,7 @@
 //! XML, downloading card images, and post-processing them. This crate is free of
 //! any GUI or browser-automation dependencies so it compiles and tests quickly.
 
+pub mod artwork_edit;
 pub mod download;
 pub mod decklist;
 pub mod new_order;

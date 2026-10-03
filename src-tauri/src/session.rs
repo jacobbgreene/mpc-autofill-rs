@@ -51,6 +51,11 @@ pub enum Command {
         selections: Vec<ArtworkSelection>,
         reply: Reply<OrderSummary>,
     },
+    ChangeArtwork {
+        drive_id: String,
+        selection: ArtworkSelection,
+        reply: Reply<OrderSummary>,
+    },
     SaveOrder {
         path: Option<PathBuf>,
         reply: Reply<OrderSummary>,
@@ -83,6 +88,7 @@ pub struct CardView {
     pub drive_id: String,
     pub name: String,
     pub slots: Vec<u32>,
+    pub query: Option<String>,
     /// True for the order's common cardback, so the UI can set it apart.
     pub cardback: bool,
 }
@@ -166,6 +172,13 @@ pub async fn run(mut inbox: mpsc::Receiver<Command>, app: AppHandle) {
                 reply,
             } => {
                 let _ = reply.send(session.edit_decklist(&text, &selections));
+            }
+            Command::ChangeArtwork {
+                drive_id,
+                selection,
+                reply,
+            } => {
+                let _ = reply.send(session.change_artwork(&drive_id, &selection));
             }
             Command::SaveOrder { path, reply } => {
                 let _ = reply.send(session.save_order(path).await);
@@ -256,6 +269,7 @@ impl Session {
                 face: face_name(face),
                 drive_id: card.drive_id.clone(),
                 name: card.name.as_deref().unwrap_or(&card.drive_id).to_owned(),
+                query: card.query.clone(),
                 slots: card.slots.iter().copied().collect(),
                 cardback: face == Face::Back && cardback_id == Some(card.drive_id.as_str()),
             })
@@ -321,6 +335,25 @@ impl Session {
         self.dirty |= self.order.as_ref() != Some(&edited);
         self.order = Some(edited);
         self.downloaded.clear();
+        self.summary()
+    }
+
+    fn change_artwork(
+        &mut self,
+        drive_id: &str,
+        selection: &ArtworkSelection,
+    ) -> Result<OrderSummary, String> {
+        let edited = self
+            .order
+            .as_ref()
+            .ok_or("no order loaded")?
+            .change_artwork(drive_id, selection)
+            .map_err(|e| e.to_string())?;
+        if self.order.as_ref() != Some(&edited) {
+            self.dirty = true;
+            self.order = Some(edited);
+            self.downloaded.clear();
+        }
         self.summary()
     }
 

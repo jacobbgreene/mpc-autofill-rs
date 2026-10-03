@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { patchCards, filterCards, placementCounts } from "../src/lib/order.ts";
+import {
+  patchCards,
+  filterCards,
+  placementCounts,
+  artworkQuery,
+} from "../src/lib/order.ts";
 
 const card = (face, status = "pending", extra = {}) => ({
   face,
@@ -44,6 +49,35 @@ test("search and face filters work together, including common cardbacks", () => 
     card("front", "pending", { name: "Lightning Bolt", drive_id: "bolt" }),
   ];
   assert.equal(filterCards(cards, "back", "  ISLAND ").length, 1);
-  assert.equal(filterCards(cards, "front", "bolt").length, 1);
+  assert.equal(filterCards(cards, "all", "bolt").length, 1);
+  assert.equal(filterCards(cards, "all", "island").length, 2);
   assert.equal(filterCards(cards, "back", "bolt").length, 0);
+});
+
+test("artwork search uses the original card query and browses common backs", () => {
+  assert.equal(
+    artworkQuery(
+      card("front", "pending", {
+        name: "Island (Variant).png",
+        query: "Island",
+      }),
+    ),
+    "Island",
+  );
+  assert.equal(
+    artworkQuery(
+      card("front", "pending", { name: "Island (shared).jpg", query: " " }),
+    ),
+    "Island",
+  );
+  assert.equal(artworkQuery(card("back")), "");
+  assert.equal(
+    artworkQuery(
+      card("back", "pending", {
+        cardback: false,
+        query: "Insectile Aberration",
+      }),
+    ),
+    "Insectile Aberration",
+  );
 });

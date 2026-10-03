@@ -15,6 +15,10 @@
   export let query: string;
   export let kind: ArtworkKind = "card";
   export let selected: ArtworkChoice | null = null;
+  export let selectedId = "";
+  export let applying = false;
+  export let applyError = "";
+  export let description = "";
   const dispatch = createEventDispatcher<{
     close: void;
     choose: ArtworkChoice;
@@ -31,6 +35,8 @@
   let generation = 0;
   let failedPreviews = new Set<string>();
   let previewRetry = 0;
+  $: locked = busy || applying;
+  $: currentId = selected?.art.drive_id ?? selectedId;
   $: pages = Math.max(1, Math.ceil((results?.count ?? 0) / ARTWORK_PAGE_SIZE));
 
   onMount(() => {
@@ -41,6 +47,7 @@
     generation++;
   });
   async function load(nextPage: number, nextQuery = query) {
+    if (applying) return;
     const token = ++generation;
     busy = true;
     error = "";
@@ -68,6 +75,9 @@
     }
     void load(next - 1);
   }
+  function close() {
+    if (!applying) dispatch("close");
+  }
 </script>
 
 <svelte:window
@@ -75,7 +85,7 @@
     if (event.key === "Escape" && dialog?.open) {
       event.preventDefault();
       event.stopPropagation();
-      dispatch("close");
+      close();
     }
   }}
 />
@@ -87,7 +97,7 @@
   on:cancel={(event) => {
     event.preventDefault();
     event.stopPropagation();
-    dispatch("close");
+    close();
   }}
 >
   <header class="editor-header">
@@ -98,7 +108,8 @@
     <button
       class="icon-button"
       aria-label="Close artwork gallery"
-      on:click={() => dispatch("close")}><Icon name="close" /></button
+      disabled={applying}
+      on:click={close}><Icon name="close" /></button
     >
   </header>
   <form
@@ -108,6 +119,7 @@
     <label class="search-field"
       ><Icon name="search" size={16} /><input
         bind:value={inputQuery}
+        disabled={applying}
         aria-label="Artwork search name"
         placeholder={kind === "cardback"
           ? "Search card backs"
@@ -116,10 +128,18 @@
     >
     <button
       class="button secondary small"
-      disabled={busy || (kind === "card" && !inputQuery.trim())}>Search</button
+      disabled={locked || (kind === "card" && !inputQuery.trim())}
+      >Search</button
     >
   </form>
-  <div class="editor-body" bind:this={body} aria-busy={busy}>
+  <div class="editor-body" bind:this={body} aria-busy={locked}>
+    {#if applying}<p class="gallery-status" role="status">
+        Updating artwork…
+      </p>{/if}
+    {#if applyError}<p class="notice error-notice" role="alert">
+        {applyError}
+      </p>{/if}
+    {#if description}<p class="editor-help">{description}</p>{/if}
     {#if busy}<p class="gallery-status" role="status">
         Searching MPC Autofill…
       </p>{/if}
@@ -127,7 +147,7 @@
         <p>{error}</p>
         <button
           class="button secondary small"
-          disabled={busy}
+          disabled={locked}
           on:click={() => load(requested.page, requested.query)}
           >Retry search</button
         >
@@ -147,9 +167,9 @@
         {#each results.cards as art, i (art.drive_id)}
           <button
             class="artwork-choice"
-            class:is-selected={selected?.art.drive_id === art.drive_id}
-            aria-pressed={selected?.art.drive_id === art.drive_id}
-            disabled={busy}
+            class:is-selected={currentId === art.drive_id}
+            aria-pressed={currentId === art.drive_id}
+            disabled={locked}
             on:click={() =>
               dispatch("choose", {
                 art,
@@ -170,7 +190,7 @@
             <strong>{art.label}</strong><span>{art.source} · {art.dpi} DPI</span
             >
             <span class="artwork-select-label"
-              >{selected?.art.drive_id === art.drive_id
+              >{currentId === art.drive_id
                 ? "✓ Selected"
                 : `Use artwork ${page * ARTWORK_PAGE_SIZE + i + 1}`}</span
             >
@@ -185,7 +205,7 @@
   <footer class="editor-footer gallery-footer">
     <button
       class="button secondary small"
-      disabled={busy || page === 0}
+      disabled={locked || page === 0}
       on:click={() => load(page - 1)}
       ><Icon name="chevron-left" size={16} />Previous</button
     >
@@ -198,14 +218,14 @@
           step="1"
           bind:value={pageInput}
           on:change={jumpPage}
-          disabled={busy || !results?.count}
+          disabled={locked || !results?.count}
           aria-label="Gallery page"
         /></label
       ><span>of {pages}</span>
     </form>
     <button
       class="button secondary small"
-      disabled={busy || !results || results.next_page === null}
+      disabled={locked || !results || results.next_page === null}
       on:click={() => results?.next_page != null && load(results.next_page)}
       >Next<Icon name="chevron-right" size={16} /></button
     >

@@ -910,7 +910,7 @@ summary {
   min-width: 0;
   border-radius: 8px;
   width: 100%;
-  height: 100%;
+  height: calc(100% - 40px);
   position: absolute;
   inset: 0;
   content-visibility: auto;
@@ -918,11 +918,35 @@ summary {
 .card-slot {
   position: relative;
   min-width: 0;
-  /* Reserve the artwork plus the two-line name, status and their margins.
+  /* Reserve artwork, two-line name, status, and the separate artwork button.
      Off-screen rendering must not change the grid's height while scrolling. */
   aspect-ratio: 5 / 7;
   box-sizing: content-box;
-  padding-bottom: 66px;
+  padding-bottom: 106px;
+}
+.card-change-art {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  height: 30px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--accent);
+  font-size: 10px;
+}
+.card-change-art:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.preview-change-art {
+  margin-top: 20px;
 }
 .card-art {
   display: block;

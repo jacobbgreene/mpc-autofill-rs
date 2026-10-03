@@ -1,12 +1,16 @@
 <script lang="ts">
+  import { createEventDispatcher } from "svelte";
   import Icon from "./Icon.svelte";
   import {
     displayName,
+    cardKey,
     needsAttention,
     statusLabels,
     type Card,
   } from "./order";
   export let card: Card;
+  export let disabled = false;
+  const dispatch = createEventDispatcher<{ changeArtwork: Card }>();
   let broken = false;
   $: if (card.thumb) broken = false;
 </script>
@@ -62,4 +66,14 @@
       {statusLabels[card.status]}
     </span>
   </button>
+  <button
+    class="card-change-art"
+    data-card-key={cardKey(card)}
+    {disabled}
+    aria-label={`Change artwork for ${displayName(card)}, ${card.face}`}
+    on:click={() => dispatch("changeArtwork", card)}
+    ><Icon name="image" size={14} />{card.cardback
+      ? "Change back"
+      : "Change artwork"}</button
+  >
 </div>

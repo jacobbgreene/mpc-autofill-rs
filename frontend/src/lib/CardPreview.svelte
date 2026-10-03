@@ -6,7 +6,12 @@
   import { displayName, statusLabels, type Card } from "./order";
   export let card: Card | null = null;
   export let artwork: Artwork | null = null;
-  const dispatch = createEventDispatcher<{ close: void }>();
+  export let editable = false;
+  export let disabled = false;
+  const dispatch = createEventDispatcher<{
+    close: void;
+    changeArtwork: Card;
+  }>();
   let dialog: HTMLDialogElement;
   let broken = false;
   let retry = 0;
@@ -88,6 +93,14 @@
             ? ""
             : "s"}.
         </p>
+        {#if editable}<button
+            class="button secondary preview-change-art"
+            {disabled}
+            on:click={() => card && dispatch("changeArtwork", card)}
+            ><Icon name="image" size={16} />{card.cardback
+              ? "Change back"
+              : "Change artwork"}</button
+          >{/if}
         <details>
           <summary>Card slots</summary>
           <p class="slot-list">
