@@ -9,6 +9,7 @@
 <script lang="ts">
   import { createEventDispatcher, onMount, onDestroy } from "svelte";
   import Icon from "./Icon.svelte";
+  import { observePreview } from "./previewVisibility";
 
   export let driveId: string;
   export let label: string;
@@ -21,23 +22,10 @@
   let loading = false;
   let generation = 0;
   let requestedId = "";
-  let observer: IntersectionObserver | undefined;
   $: if (visible) void load(driveId, retry);
-  onMount(() => {
-    observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          visible = true;
-          observer?.disconnect();
-        }
-      },
-      { rootMargin: "160px" },
-    );
-    observer.observe(container);
-  });
+  onMount(() => observePreview(container, () => (visible = true)));
   onDestroy(() => {
     generation++;
-    observer?.disconnect();
   });
   async function load(id: string, attempt: number) {
     if (requestedId === id && !error) return;
@@ -70,6 +58,7 @@
     {#key src}<img
         {src}
         alt={label}
+        decoding="async"
         on:load={() => {
           loading = false;
           dispatch("loaded");

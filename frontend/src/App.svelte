@@ -45,6 +45,8 @@
   let savedMessage = "";
   let running = false;
   let closing = false;
+  let appBar: HTMLElement;
+  let appBarHeight = 0;
 
   const filters: { value: Filter; label: string }[] = [
     { value: "all", label: "All cards" },
@@ -74,6 +76,10 @@
   onMount(() => {
     let disposed = false;
     const unlisteners: UnlistenFn[] = [];
+    const toolbarSize = new ResizeObserver(() => {
+      appBarHeight = appBar.clientHeight;
+    });
+    toolbarSize.observe(appBar);
     async function register(subscription: Promise<UnlistenFn>) {
       const off = await subscription;
       if (disposed) off();
@@ -173,6 +179,7 @@
     void connect();
     return () => {
       disposed = true;
+      toolbarSize.disconnect();
       unlisteners.forEach((off) => off());
       if (frame !== null) cancelAnimationFrame(frame);
     };
@@ -374,21 +381,32 @@
     ) {
       event.preventDefault();
       searchInput?.focus();
+      searchInput?.scrollIntoView({ block: "center" });
     }
   }}
 />
 
-<div class="app-shell">
-  <header class="app-bar">
+<div class="app-shell" style:--app-bar-height={`${appBarHeight}px`}>
+  <header class="app-bar" class:has-order={!!summary} bind:this={appBar}>
     <div class="brand">
       <span class="brand-mark"><Icon size={20} /></span><span
         >MPC <strong>Autofill</strong></span
       >
     </div>
-    <span class="app-tagline">A little less work. A lot more cards.</span>
+    {#if !summary}<span class="app-tagline"
+        >A little less work. A lot more cards.</span
+      >{/if}
     {#if summary}<div class="file-actions">
         <span class="save-status" class:unsaved={summary.dirty} role="status"
           >{summary.dirty ? "Unsaved changes" : savedMessage}</span
+        ><button
+          class="button secondary small"
+          disabled={busy}
+          on:click={() => (editorMode = "edit")}>Edit list</button
+        ><button
+          class="button secondary small"
+          disabled={busy}
+          on:click={() => (editorMode = "replace")}>Replace deck</button
         ><button
           class="button secondary small"
           on:click={() => saveOrder()}
@@ -576,19 +594,9 @@
                   >{/if}</button
               >{/each}
           </div>
-          <div class="deck-actions">
-            <button
-              class="text-button"
-              disabled={busy}
-              on:click={() => (editorMode = "edit")}>Edit list</button
-            ><button
-              class="text-button"
-              disabled={busy}
-              on:click={() => (editorMode = "replace")}>Replace deck</button
-            ><span class="result-count" aria-live="polite"
-              >{visibleCards.length} images</span
-            >
-          </div>
+          <span class="result-count" aria-live="polite"
+            >{visibleCards.length} images</span
+          >
         </div>
         {#if visibleCards.length}
           <div class="card-grid">

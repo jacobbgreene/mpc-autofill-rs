@@ -106,6 +106,16 @@ button {
   gap: 24px;
   border-bottom: 1px solid var(--border);
 }
+.app-bar.has-order {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg);
+}
+.library input,
+.card-tile {
+  scroll-margin-top: calc(var(--app-bar-height, 0px) + 16px);
+}
 .brand {
   display: flex;
   align-items: center;
@@ -438,11 +448,7 @@ main {
 .start-action .button {
   min-width: 175px;
 }
-/* Persistent stage context while the card collection scrolls underneath. */
 .progress-panel {
-  position: sticky;
-  top: 0;
-  z-index: 5;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 11px;
@@ -749,8 +755,20 @@ summary {
   background: transparent;
   min-width: 0;
   border-radius: 8px;
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  inset: 0;
   content-visibility: auto;
-  contain-intrinsic-size: auto 300px;
+}
+.card-slot {
+  position: relative;
+  min-width: 0;
+  /* Reserve the artwork plus the two-line name, status and their margins.
+     Off-screen rendering must not change the grid's height while scrolling. */
+  aspect-ratio: 5 / 7;
+  box-sizing: content-box;
+  padding-bottom: 66px;
 }
 .card-art {
   display: block;
@@ -1163,9 +1181,13 @@ summary {
 /* File actions and the decklist editor use the same desktop controls. */
 .file-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 7px;
   margin-left: auto;
+}
+.file-actions .button {
+  white-space: nowrap;
 }
 .save-status {
   color: var(--ok);
@@ -1174,14 +1196,6 @@ summary {
 }
 .save-status.unsaved {
   color: var(--warning);
-}
-.deck-actions {
-  display: flex;
-  align-items: center;
-  gap: 15px;
-}
-.deck-actions .text-button {
-  font-size: 11px;
 }
 .editor-dialog {
   width: min(900px, calc(100vw - 32px));
@@ -1198,8 +1212,7 @@ summary {
   flex-direction: column;
 }
 .editor-dialog::backdrop {
-  background: #11121acc;
-  backdrop-filter: blur(4px);
+  background: #11121ae6;
 }
 .editor-header {
   display: flex;
@@ -1351,31 +1364,22 @@ textarea:focus-visible {
   .library-controls {
     flex-wrap: wrap;
   }
-  .deck-actions {
-    margin-left: auto;
+  .app-bar {
+    flex-wrap: wrap;
+  }
+  .file-actions {
+    order: 1;
+    flex-basis: 100%;
+    margin-left: 0;
   }
   .file-actions .save-status {
-    max-width: 75px;
+    margin-right: auto;
     line-height: 1.5;
-    text-align: right;
   }
 }
 @media (max-width: 600px) {
   .app-bar {
-    flex-wrap: wrap;
     gap: 12px;
-  }
-  .file-actions {
-    flex-wrap: wrap;
-  }
-  .file-actions .save-status {
-    max-width: none;
-  }
-  .deck-actions {
-    width: 100%;
-  }
-  .deck-actions .result-count {
-    margin-left: auto;
   }
   .editor-header {
     padding: 18px;
