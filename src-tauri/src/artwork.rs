@@ -19,7 +19,9 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires access to the live MPC Autofill API"]
     async fn live_artwork_search_returns_selectable_drive_images() {
-        let results = search_artwork("Lightning Bolt".into(), 0).await.unwrap();
+        let results = search_artwork("Lightning Bolt".into(), 0, None)
+            .await
+            .unwrap();
         assert!(results.count > 0);
         assert!(!results.cards.is_empty());
         assert!(results
@@ -27,11 +29,26 @@ mod tests {
             .iter()
             .all(|card| !card.drive_id.is_empty() && card.thumb.starts_with("https://")));
     }
+
+    #[tokio::test]
+    #[ignore = "requires access to the live MPC Autofill API"]
+    async fn live_cardback_search_can_browse_without_a_query() {
+        let results = search_artwork(String::new(), 0, Some(SearchKind::Cardback))
+            .await
+            .unwrap();
+        assert!(results.count > 0);
+        assert!(!results.cards.is_empty());
+        assert!(results
+            .cards
+            .iter()
+            .all(|card| card.card_type == "CARDBACK"));
+    }
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RemoteCard {
+    card_type: String,
     identifier: String,
     name: String,
     extension: String,
@@ -42,6 +59,7 @@ struct RemoteCard {
 
 #[derive(Serialize)]
 pub struct ArtworkOption {
+    card_type: String,
     drive_id: String,
     name: String,
     label: String,
@@ -57,10 +75,22 @@ pub struct ArtworkResults {
     next_page: Option<u32>,
 }
 
+#[derive(Deserialize, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+pub enum SearchKind {
+    Card,
+    Cardback,
+}
+
 #[tauri::command]
-pub async fn search_artwork(query: String, page: u32) -> Result<ArtworkResults, String> {
+pub async fn search_artwork(
+    query: String,
+    page: u32,
+    kind: Option<SearchKind>,
+) -> Result<ArtworkResults, String> {
     let query = query.trim();
-    if query.is_empty() || query.len() > 300 || page > 1000 {
+    let cardbacks = matches!(kind, Some(SearchKind::Cardback));
+    if (!cardbacks && query.is_empty()) || query.len() > 300 || page > 1000 {
         return Err("enter a card name to search".into());
     }
     let client = autofill_core::download::build_client();
@@ -87,7 +117,7 @@ pub async fn search_artwork(query: String, page: u32) -> Result<ArtworkResults, 
         .filter_map(|(id, _)| id.parse::<u64>().ok().map(|id| json!([id, true])))
         .collect();
     let body = json!({
-        "query": query, "cardTypes": ["CARD", "TOKEN"],
+        "query": (!query.is_empty()).then_some(query), "cardTypes": if cardbacks { vec!["CARDBACK"] } else { vec!["CARD", "TOKEN"] },
         "pageSize": PAGE_SIZE, "pageStart": page * PAGE_SIZE, "sortBy": "nameAscending",
         "searchSettings": {
             "sourceSettings": { "sources": sources },
@@ -118,6 +148,7 @@ pub async fn search_artwork(query: String, page: u32) -> Result<ArtworkResults, 
             .cards
             .into_iter()
             .map(|card| ArtworkOption {
+                card_type: card.card_type,
                 // Include the image ID to keep two artists' same-named files distinct.
                 name: format!("{} ({}).{}", card.name, card.identifier, card.extension),
                 drive_id: card.identifier,

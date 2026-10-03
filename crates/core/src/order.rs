@@ -26,7 +26,7 @@ pub enum Source {
     LocalFile,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Cardstock {
     S27,
     S30,

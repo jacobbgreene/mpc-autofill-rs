@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 use autofill_automation::{Driver, Error as AutomationError, ImageMode};
 use autofill_core::decklist::{ArtworkSelection, DecklistPreview};
+use autofill_core::new_order::NewOrderOptions;
 use autofill_core::{download, DownloadJob, DownloadOutcome, Face, Order, PostProcess, Source};
 use futures::stream::{self, StreamExt};
 use serde::Serialize;
@@ -27,6 +28,12 @@ pub enum Command {
     },
     LoadThumbnails {
         reply: Reply<()>,
+    },
+    CreateOrder {
+        options: NewOrderOptions,
+        text: String,
+        selections: Vec<ArtworkSelection>,
+        reply: Reply<OrderSummary>,
     },
     GetDecklist {
         reply: Reply<String>,
@@ -115,6 +122,14 @@ pub async fn run(mut inbox: mpsc::Receiver<Command>, app: AppHandle) {
             Command::LoadThumbnails { reply } => {
                 session.spawn_thumbnail_fetch();
                 let _ = reply.send(Ok(()));
+            }
+            Command::CreateOrder {
+                options,
+                text,
+                selections,
+                reply,
+            } => {
+                let _ = reply.send(session.create_order(&options, &text, &selections));
             }
             Command::GetDecklist { reply } => {
                 let _ = reply.send(
@@ -237,6 +252,40 @@ impl Session {
         };
 
         Ok(summary)
+    }
+
+    fn create_order(
+        &mut self,
+        options: &NewOrderOptions,
+        text: &str,
+        selections: &[ArtworkSelection],
+    ) -> Result<OrderSummary, String> {
+        // Resolve and validate the complete draft before replacing a loaded order.
+        let order = options
+            .create(text, selections)
+            .map_err(|e| e.to_string())?;
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| e.to_string())?
+            .as_nanos();
+        let cards_dir = self
+            .app
+            .path()
+            .app_cache_dir()
+            .map_err(|e| e.to_string())?
+            .join("drafts")
+            .join(stamp.to_string())
+            .join("cards");
+        self.app
+            .asset_protocol_scope()
+            .allow_directory(&cards_dir, true)
+            .map_err(|e| e.to_string())?;
+        self.cards_dir = cards_dir;
+        self.order_path = PathBuf::new();
+        self.downloaded.clear();
+        self.dirty = true;
+        self.order = Some(order);
+        self.summary()
     }
 
     fn edit_decklist(

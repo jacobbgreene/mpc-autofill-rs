@@ -4,6 +4,7 @@
 
 pub mod download;
 pub mod decklist;
+pub mod new_order;
 pub mod image_proc;
 pub mod order;
 

@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use autofill_core::decklist::{ArtworkSelection, DecklistPreview};
+use autofill_core::new_order::NewOrderOptions;
 use session::{Command, OrderSummary};
 use tauri::{Manager, State};
 use tokio::sync::{mpsc, oneshot};
@@ -134,6 +135,34 @@ async fn read_decklist(path: String) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn preview_new_decklist(
+    options: NewOrderOptions,
+    text: String,
+    selections: Vec<ArtworkSelection>,
+) -> Result<DecklistPreview, String> {
+    options
+        .preview(&text, &selections)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn create_order(
+    state: State<'_, AppState>,
+    options: NewOrderOptions,
+    text: String,
+    selections: Vec<ArtworkSelection>,
+) -> Result<OrderSummary, String> {
+    state
+        .request(|reply| Command::CreateOrder {
+            options,
+            text,
+            selections,
+            reply,
+        })
+        .await
+}
+
 /// Longest the exit path waits for the actor to close the browser. The actor
 /// handles commands sequentially, so a mid-fill or mid-download Shutdown can
 /// only be serviced after the current command returns; without a bound, a
@@ -156,7 +185,7 @@ fn main() {
             app.manage(AppState { inbox });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load_order, thumbnails, download, fill, get_decklist, preview_decklist, edit_decklist, save_order, read_decklist, artwork::search_artwork])
+        .invoke_handler(tauri::generate_handler![load_order, thumbnails, download, fill, get_decklist, preview_decklist, edit_decklist, save_order, read_decklist, preview_new_decklist, create_order, artwork::search_artwork])
         .build(tauri::generate_context!())
         .expect("failed to start MPC Autofill")
         .run(|app, event| {

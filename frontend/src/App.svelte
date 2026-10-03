@@ -38,7 +38,9 @@
   let downloadCompleted = 0;
   let downloadFailures = 0;
   let searchInput: HTMLInputElement;
-  let editorMode: "edit" | "replace" | null = null;
+  let editorMode: "edit" | "replace" | "create" | null = null;
+  let draftText = "";
+  let draftName = "New deck";
   let savedMessage = "";
   let running = false;
   let closing = false;
@@ -135,12 +137,13 @@
               if (payload.type === "drop") {
                 if (
                   payload.paths.length !== 1 ||
-                  !payload.paths[0].toLowerCase().endsWith(".xml")
+                  !/\.(xml|txt)$/i.test(payload.paths[0])
                 ) {
-                  orderError = "Choose one order XML file at a time.";
+                  orderError =
+                    "Choose one .xml order or .txt decklist at a time.";
                   return;
                 }
-                void loadOrder(payload.paths[0]);
+                void openPath(payload.paths[0]);
               }
             }),
           ),
@@ -216,17 +219,46 @@
     }
   }
 
-  async function openOrder() {
+  function pasteDecklist() {
+    draftText = "";
+    draftName = "New deck";
+    editorMode = "create";
+  }
+
+  async function openPath(path: string) {
+    if (!path.toLowerCase().endsWith(".txt")) return loadOrder(path);
+    if (busy || !connected) return;
+    busy = true;
+    dragging = false;
+    orderError = "";
+    try {
+      draftText = await invoke<string>("read_decklist", { path });
+      draftName =
+        path
+          .split(/[\\/]/)
+          .pop()
+          ?.replace(/\.txt$/i, "") || "New deck";
+      editorMode = "create";
+    } catch (e) {
+      orderError = `Could not import this decklist: ${String(e)}`;
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function openOrder(textOnly = false) {
     if (busy || !connected) return;
     busy = true;
     orderError = "";
     try {
       const path = await open({
         multiple: false,
-        filters: [{ name: "Order XML", extensions: ["xml"] }],
+        filters: textOnly
+          ? [{ name: "Text decklist", extensions: ["txt"] }]
+          : [{ name: "Order or decklist", extensions: ["xml", "txt"] }],
       });
       busy = false;
-      if (typeof path === "string") await loadOrder(path);
+      if (typeof path === "string") await openPath(path);
     } catch (e) {
       orderError = `Could not open the file picker: ${String(e)}`;
     } finally {
@@ -271,9 +303,11 @@
     savedMessage = "";
     try {
       let path: string | null = null;
-      if (saveAs) {
+      if (saveAs || !summary.path) {
         path = await save({
-          defaultPath: summary.path,
+          defaultPath:
+            summary.path ||
+            `${summary.name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")}.xml`,
           filters: [{ name: "Order XML", extensions: ["xml"] }],
         });
         if (!path) return;
@@ -364,7 +398,7 @@
           disabled={busy || !connected}>Save as…</button
         ><button
           class="button secondary small"
-          on:click={openOrder}
+          on:click={() => openOrder()}
           disabled={busy || !connected}
           ><Icon name="folder" size={16} />Open order</button
         >
@@ -400,25 +434,41 @@
           Great cards.<br /><span>Less clicking.</span>
         </h1>
         <p class="welcome-description">
-          Bring your order. We’ll prepare the images and<br class="wide-only" /> build
-          your MakePlayingCards project for you.
+          Bring your decklist. We’ll prepare the images and<br
+            class="wide-only"
+          /> build your MakePlayingCards project for you.
         </p>
         <div class="drop-zone" class:dragging>
           <span class="drop-icon"><Icon name="import" size={24} /></span>
           <div>
             <h2>
-              {dragging ? "Drop your order here" : "Drop an order XML here"}
+              {dragging
+                ? "Drop your file here"
+                : "Drop a decklist or order here"}
             </h2>
-            <p>Exported from MPC Autofill · one file at a time</p>
+            <p>Text decklist (.txt) or MPC Autofill order (.xml)</p>
           </div>
           <button
-            class="button primary"
-            on:click={openOrder}
+            class="button secondary"
+            on:click={() => openOrder()}
             disabled={busy || !connected}
             >{busy ? "Opening…" : "Open order"}<Icon
               name="arrow"
               size={16}
             /></button
+          >
+        </div>
+        <div class="welcome-import-actions">
+          <button
+            class="button primary"
+            disabled={busy || !connected}
+            on:click={() => openOrder(true)}
+            ><Icon name="import" size={17} />Import .txt decklist</button
+          >
+          <button
+            class="button secondary"
+            disabled={busy || !connected}
+            on:click={pasteDecklist}>Paste a decklist</button
           >
         </div>
         <ol class="welcome-steps">
@@ -582,12 +632,15 @@
 
 {#if dragging && summary}<div class="drop-overlay" role="status">
     <Icon name="import" size={40} />
-    <h2>Drop an order XML to open it</h2>
-    <p>This will replace the current order.</p>
+    <h2>Drop a .txt decklist or .xml order</h2>
+    <p>Text lists open as a new deck draft.</p>
   </div>{/if}
 <CardPreview card={selectedCard} on:close={() => (selectedKey = null)} />
 {#if editorMode}<DeckEditor
     mode={editorMode}
+    initialText={editorMode === "create" ? draftText : ""}
+    initialName={draftName}
+    replacingUnsaved={summary?.dirty ?? false}
     on:close={() => (editorMode = null)}
     on:applied={(event) => applyEditedOrder(event.detail)}
   />{/if}

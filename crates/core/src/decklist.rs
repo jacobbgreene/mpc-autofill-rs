@@ -24,6 +24,7 @@ pub struct MissingArtwork {
 pub struct DecklistPreview {
     pub quantity: u32,
     pub unresolved: Vec<MissingArtwork>,
+    pub needs_common_back: bool,
 }
 
 struct Entry {
@@ -213,6 +214,7 @@ impl Order {
         let mut preview = DecklistPreview {
             quantity: 0,
             unresolved: Vec::new(),
+            needs_common_back: false,
         };
         for (index, line) in text.lines().enumerate() {
             let line = line.trim().trim_start_matches('\u{feff}');
@@ -259,6 +261,7 @@ impl Order {
             } else {
                 self.common_back()
             };
+            preview.needs_common_back |= back_name.is_none() && back.is_none();
             entries.push(Entry {
                 quantity,
                 front,

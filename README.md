@@ -1,7 +1,7 @@
 # MPC Autofill (Rust)
 
 A Rust/Tauri desktop app that auto-fills a card order into the MakePlayingCards
-project editor. It parses an order XML, downloads the card images, and drives a
+project editor. It imports a text decklist or an order XML, downloads the card images, and drives a
 visible Chrome via the Chrome DevTools Protocol to build the project — all from a
 single window.
 
@@ -54,6 +54,16 @@ to an existing project, order combining/splitting, PDF export, and save-to-accou
 
 ## Working with an order
 
+Start with **Import .txt decklist**, **Paste a decklist**, or drop a `.txt` file
+onto the welcome screen. Choose a name, cardstock and finish, select artwork for
+the listed cards, and browse MPC Autofill's cardback gallery for a common reverse.
+Explicit double-faced pairs keep their own backs. A common back is only required
+for cards without an explicit reverse.
+
+**Create deck** opens the completed draft in the card library. The first **Save**
+asks where to write its XML order; the imported text file stays unchanged. The
+**Open order** picker also accepts `.txt` files when another order is loaded.
+
 Open or drop an order XML to browse its cards. Search by name, filter fronts,
 backs, or images needing attention, and click a card for a larger preview.
 Autofill shows each stage and asks you to sign in in Chrome when necessary.
@@ -92,5 +102,5 @@ The normal Rust suite runs offline with `nix develop --command cargo test --work
 An optional live artwork-search check is available with:
 
 ```sh
-nix develop --command cargo test -p mpc-autofill live_artwork_search_returns_selectable_drive_images -- --ignored
+nix develop --command cargo test -p mpc-autofill artwork::tests -- --ignored
 ```
