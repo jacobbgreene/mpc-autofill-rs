@@ -3,6 +3,13 @@
   import { invoke } from "@tauri-apps/api/core";
   import { open, confirm } from "@tauri-apps/plugin-dialog";
   import Icon from "./Icon.svelte";
+  import ArtworkCard from "./ArtworkCard.svelte";
+  import ArtworkGallery from "./ArtworkGallery.svelte";
+  import {
+    createArtworkSearch,
+    type ArtworkChoice,
+    type ArtworkResults,
+  } from "./artwork";
   import type { OrderSummary } from "./order";
 
   export let mode: "edit" | "replace" | "create";
@@ -14,42 +21,40 @@
     applied: OrderSummary;
   }>();
   type Missing = { query: string; face: "front" | "back" };
-  type SearchTarget = Missing | { query: string; face: "common" };
-  type Selection = Missing & { drive_id: string; name: string };
   type Preview = {
     quantity: number;
     unresolved: Missing[];
     needs_common_back: boolean;
   };
-  type Artwork = {
-    drive_id: string;
-    name: string;
-    label: string;
-    source: string;
-    dpi: number;
-    thumb: string;
-  };
-  type Results = { cards: Artwork[]; count: number; next_page: number | null };
+  const newArtworkSearch = () =>
+    createArtworkSearch((query, page, kind) =>
+      invoke<ArtworkResults>("search_artwork", { query, page, kind }),
+    );
+  let artwork = newArtworkSearch();
+  const key = (item: Missing) =>
+    JSON.stringify([item.query.toLowerCase(), item.face]);
   let dialog: HTMLDialogElement;
+  let body: HTMLDivElement;
+  let grid: HTMLDivElement;
   let text = initialText;
   let originalText = initialText;
   let orderName = initialName;
   let stock = "S30";
   let foil = false;
-  let commonBack: Artwork | null = null;
+  let commonBack: ArtworkChoice | null = null;
   let busy = true;
   let error = "";
   let preview: Preview | null = null;
-  let selections: Selection[] = [];
-  let active: SearchTarget | null = null;
-  let artworkQuery = "";
-  let results: Results | null = null;
-  let searchError = "";
-  let searching = false;
-  let page = 0;
-  let generation = 0;
-  let disposed = false;
-  let artworkPanel: HTMLElement;
+  let choices: Record<string, ArtworkChoice> = {};
+  let loading = new Set<string>();
+  let showText = true;
+  let backGallery = false;
+  $: selections = (preview?.unresolved ?? []).flatMap((item) => {
+    const choice = choices[key(item)];
+    return choice
+      ? [{ ...item, drive_id: choice.art.drive_id, name: choice.art.name }]
+      : [];
+  });
   $: remaining =
     preview?.unresolved.filter(
       (item) =>
@@ -75,18 +80,15 @@
     }
   });
   onDestroy(() => {
-    disposed = true;
-    generation += 1;
+    artwork.dispose();
   });
 
   function invalidate() {
     preview = null;
-    selections = [];
-    active = null;
-    results = null;
-    searching = false;
+    loading = new Set();
+    artwork.dispose();
+    artwork = newArtworkSearch();
     error = "";
-    generation += 1;
   }
   async function close() {
     if (busy) return;
@@ -123,6 +125,7 @@
       const imported = await invoke<string>("read_decklist", { path });
       text = imported;
       invalidate();
+      await review();
     } catch (e) {
       error = String(e);
     } finally {
@@ -137,54 +140,31 @@
         mode === "create"
           ? await invoke<Preview>("preview_new_decklist", {
               text,
-              selections,
+              selections: [],
               options: { ...newOrderOptions(), cardback: null },
             })
-          : await invoke<Preview>("preview_decklist", { text, selections });
+          : await invoke<Preview>("preview_decklist", { text, selections: [] });
+      showText = false;
+      loading = new Set(
+        preview.unresolved.filter((item) => !choices[key(item)]).map(key),
+      );
+      await tick();
+      if (window.innerHeight <= 660 && grid) {
+        body.scrollTop +=
+          grid.getBoundingClientRect().top -
+          body.getBoundingClientRect().top -
+          12;
+      }
     } catch (e) {
       error = String(e);
     } finally {
       busy = false;
     }
   }
-  async function search(target: SearchTarget, nextPage = 0) {
-    const token = ++generation;
-    active = target;
-    searching = true;
-    searchError = "";
-    results = null;
-    page = nextPage;
-    await tick();
-    artworkPanel?.scrollIntoView({ block: "start", behavior: "auto" });
-    try {
-      const found = await invoke<Results>("search_artwork", {
-        query: artworkQuery,
-        page,
-        kind: target.face === "common" ? "cardback" : "card",
-      });
-      if (!disposed && token === generation) {
-        results = found;
-        await tick();
-        artworkPanel?.scrollIntoView({ block: "start", behavior: "auto" });
-      }
-    } catch (e) {
-      if (!disposed && token === generation) searchError = String(e);
-    } finally {
-      if (!disposed && token === generation) searching = false;
-    }
-  }
-  function choose(art: Artwork) {
-    if (!active) return;
-    if (active.face === "common") commonBack = art;
-    else
-      selections = [
-        ...selections.filter(
-          (s) => s.query !== active?.query || s.face !== active?.face,
-        ),
-        { ...active, drive_id: art.drive_id, name: art.name },
-      ];
-    active = null;
-    results = null;
+  function setLoading(item: Missing, value: boolean) {
+    if (value) loading.add(key(item));
+    else loading.delete(key(item));
+    loading = new Set(loading);
   }
   function newOrderOptions() {
     return {
@@ -192,20 +172,13 @@
       stock,
       foil,
       cardback: commonBack
-        ? { drive_id: commonBack.drive_id, name: commonBack.name }
+        ? { drive_id: commonBack.art.drive_id, name: commonBack.art.name }
         : null,
     };
   }
-  function browseBacks() {
-    artworkQuery = "";
-    void search({ query: "Common card back", face: "common" });
-  }
-  function nextPage() {
-    if (active && results?.next_page != null)
-      void search(active, results.next_page);
-  }
   async function apply() {
-    if (!preview || remaining.length || needsBack || busy) return;
+    if (!preview || remaining.length || needsBack || busy || loading.size)
+      return;
     busy = true;
     error = "";
     try {
@@ -237,7 +210,8 @@
 
 <dialog
   bind:this={dialog}
-  class="editor-dialog"
+  class="editor-dialog deck-editor"
+  class:has-artwork={!!preview}
   aria-labelledby="editor-title"
   on:cancel={(event) => {
     event.preventDefault();
@@ -246,13 +220,17 @@
 >
   <header class="editor-header">
     <div>
-      <p class="eyebrow">YOUR ORDER, YOUR WAY</p>
+      <p class="eyebrow">
+        {preview ? "MAKE IT YOUR DECK" : "YOUR ORDER, YOUR WAY"}
+      </p>
       <h2 id="editor-title">
-        {mode === "create"
-          ? "Create a deck from text"
-          : mode === "edit"
-            ? "Edit your decklist"
-            : "Replace your decklist"}
+        {preview
+          ? "Choose your artwork"
+          : mode === "create"
+            ? "Create a deck from text"
+            : mode === "edit"
+              ? "Edit your decklist"
+              : "Replace your decklist"}
       </h2>
     </div>
     <button
@@ -262,237 +240,208 @@
       on:click={close}><Icon name="close" /></button
     >
   </header>
-  <div class="editor-body">
-    <p class="editor-description">
-      {mode === "create"
-        ? "Import or paste your card list, then choose the artwork and card backs you want to print."
-        : mode === "edit"
-          ? "Change quantities, remove cards, or add something new."
-          : "Paste another decklist or import a text file to replace the cards in this order."}
-      {#if mode !== "create"}Matching cards keep their artwork. Stock, finish,
-        and the common back stay the same.{/if}
-    </p>
-    {#if mode === "create"}
-      <div class="new-order-settings">
-        <label class="order-name-field"
-          >Order name<input
-            bind:value={orderName}
-            maxlength="200"
-            disabled={busy}
-          /></label
-        >
-        <label
-          >Cardstock<select bind:value={stock} disabled={busy}>
-            <option value="S27">S27 · Smooth</option><option value="S30"
-              >S30 · Standard Smooth</option
-            ><option value="S33">S33 · Superior Smooth</option><option
-              value="M31">M31 · Linen</option
-            ><option value="P10">P10 · Plastic</option>
-          </select></label
-        >
-        <label class="foil-option"
-          ><input
-            type="checkbox"
-            bind:checked={foil}
-            disabled={busy || stock === "P10"}
-          />Foil finish</label
-        >
-      </div>
-      <div class="new-order-cardback">
-        {#if commonBack}<img
-            src={commonBack.thumb}
-            alt={commonBack.label}
-          />{:else}<span class="back-mini"><Icon size={24} /></span>{/if}
-        <div>
-          <strong
-            >{commonBack
-              ? commonBack.label
-              : "Choose a common card back"}</strong
-          >
-          <p>Used for cards without a custom reverse.</p>
-        </div>
-        <button
-          class="button secondary small"
-          disabled={busy || searching}
-          on:click={browseBacks}
-          >{commonBack ? "Change card back" : "Choose card back"}<Icon
-            name="image"
-            size={14}
-          /></button
-        >
-      </div>
-    {/if}
-    <div class="editor-label">
-      <label for="decklist-text">Decklist</label><button
-        class="button secondary small"
-        disabled={busy}
-        on:click={importText}
-        ><Icon name="folder" size={14} />Import .txt</button
-      >
-    </div>
-    <textarea
-      id="decklist-text"
-      bind:value={text}
-      on:input={invalidate}
-      disabled={busy}
-      spellcheck="false"
-      placeholder={"1 Lightning Bolt\n4 Island\n1 Delver of Secrets | Insectile Aberration"}
-      aria-describedby="decklist-help"
-    />
-    <p id="decklist-help" class="editor-help">
-      One card per line: <code>4 Island</code> or <code>4x Island</code>. Use
-      <code>Front name | Back name</code> for double-faced cards. Blank lines and
-      # comments are ignored. Maximum 612 cards.
-    </p>
+  <div class="editor-body" bind:this={body}>
     {#if error}<div class="notice error-notice" role="alert">
         <Icon name="warning" />
         <p>{error}</p>
       </div>{/if}
     {#if preview}
-      <div class="draft-summary" role="status">
-        <Icon name={remaining.length || needsBack ? "image" : "check"} />
+      <div class="deck-artwork-heading">
         <div>
-          <strong>{preview.quantity} cards in this decklist</strong>
+          <strong>{preview.quantity} cards in your deck</strong>
           <p>
-            {remaining.length
-              ? `Choose artwork for ${remaining.length} new image${remaining.length === 1 ? "" : "s"} before applying.`
-              : needsBack
-                ? "Choose a common card back to finish your deck."
-                : mode === "create"
-                  ? "Your deck is ready to create."
-                  : "Artwork is resolved. Your changes are ready to apply."}
+            Use the arrows or enter an artwork number. Open the gallery to
+            compare options.
           </p>
         </div>
+        <button
+          class="button secondary small"
+          disabled={busy}
+          on:click={() => (showText = !showText)}
+          >{showText ? "Hide decklist" : "Edit decklist"}</button
+        >
       </div>
-      {#if preview.unresolved.length}
-        <ul class="artwork-requests">
-          {#each preview.unresolved as item}<li>
-              <div>
-                <strong>{item.query}</strong><span>{item.face} image</span>
-              </div>
-              <button
-                class="button secondary small"
-                disabled={busy || searching}
-                on:click={() => {
-                  artworkQuery = item.query;
-                  void search(item);
-                }}
-                >{selections.some(
-                  (s) => s.query === item.query && s.face === item.face,
-                )
-                  ? "Change artwork"
-                  : "Choose artwork"}<Icon name="image" size={14} /></button
-              >{#if selections.some((s) => s.query === item.query && s.face === item.face)}<span
-                  class="art-selected"
-                  ><Icon name="check" size={14} />Selected</span
-                >{/if}
-            </li>{/each}
-        </ul>
-      {/if}
     {/if}
-    {#if active}
-      <section
-        bind:this={artworkPanel}
-        class="artwork-picker"
-        aria-label={`Choose artwork for ${active.query}`}
-      >
-        <div class="artwork-picker-heading">
+    {#if showText}
+      <div class="decklist-input-panel">
+        {#if !preview}<p class="editor-description">
+            {mode === "create"
+              ? "Paste your card list or import a .txt file to start choosing artwork."
+              : mode === "edit"
+                ? "Change quantities, remove cards, or add something new. Matching cards keep their artwork."
+                : "Paste another decklist or import a .txt file. Matching cards keep their artwork."}
+          </p>{/if}
+        <div class="editor-label">
+          <label for="decklist-text">Decklist</label><button
+            class="button secondary small"
+            disabled={busy}
+            on:click={importText}
+            ><Icon name="folder" size={14} />Import .txt</button
+          >
+        </div>
+        <textarea
+          id="decklist-text"
+          bind:value={text}
+          on:input={invalidate}
+          disabled={busy}
+          spellcheck="false"
+          placeholder={"1 Lightning Bolt\n4 Island\n1 Delver of Secrets | Insectile Aberration"}
+          aria-describedby="decklist-help"
+        />
+        <p id="decklist-help" class="editor-help">
+          One card per line: <code>4 Island</code> or <code>4x Island</code>.
+          Use <code>Front name | Back name</code> for double-faced cards. Blank lines
+          and # comments are ignored. Maximum 612 cards.
+        </p>
+      </div>
+    {/if}
+    {#if mode === "create"}
+      <details class="deck-print-settings" open={!preview}>
+        <summary
+          >Print settings <span
+            >{orderName} · {stock}{foil ? " · Foil" : ""}</span
+          ></summary
+        >
+        <div class="new-order-settings">
+          <label class="order-name-field"
+            >Order name<input
+              bind:value={orderName}
+              maxlength="200"
+              disabled={busy}
+            /></label
+          >
+          <label
+            >Cardstock<select bind:value={stock} disabled={busy}>
+              <option value="S27">S27 · Smooth</option><option value="S30"
+                >S30 · Standard Smooth</option
+              ><option value="S33">S33 · Superior Smooth</option><option
+                value="M31">M31 · Linen</option
+              ><option value="P10">P10 · Plastic</option>
+            </select></label
+          >
+          <label class="foil-option"
+            ><input
+              type="checkbox"
+              bind:checked={foil}
+              disabled={busy || stock === "P10"}
+            />Foil finish</label
+          >
+        </div>
+      </details>
+    {/if}
+    {#if preview}
+      {#if preview.unresolved.length}
+        <div class="artwork-deck-grid" bind:this={grid}>
+          {#each preview.unresolved as item (key(item))}
+            <ArtworkCard
+              name={item.query}
+              face={item.face}
+              search={artwork.search}
+              initial={choices[key(item)] ?? null}
+              disabled={busy}
+              on:choose={(event) =>
+                (choices = { ...choices, [key(item)]: event.detail })}
+              on:loading={(event) => setLoading(item, event.detail)}
+            />
+          {/each}
+        </div>
+        <p class="artwork-auto-note">
+          The first match is selected to get you started. The artwork shown on
+          each card is what will be used.
+        </p>
+      {:else}<div class="draft-summary">
+          <Icon name="check" />
           <div>
-            <p class="eyebrow">MPC AUTOFILL ARTWORK</p>
-            <h3>{active.query}</h3>
+            <strong>Your existing artwork is ready</strong>
+            <p>All cards matched images already in this order.</p>
+          </div>
+        </div>{/if}
+      {#if mode === "create" && preview.needs_common_back}
+        <div class="new-order-cardback">
+          {#if commonBack}<img
+              src={commonBack.art.thumb}
+              alt={commonBack.art.label}
+            />{:else}<span class="back-mini"><Icon size={24} /></span>{/if}
+          <div>
+            <strong
+              >{commonBack
+                ? commonBack.art.label
+                : "Choose a common card back"}</strong
+            >
+            <p>Used for cards without a custom reverse.</p>
           </div>
           <button
-            class="icon-button"
-            aria-label="Close artwork search"
-            on:click={() => {
-              active = null;
-              generation += 1;
-              searching = false;
-            }}><Icon name="close" size={16} /></button
+            class="button secondary small"
+            disabled={busy}
+            on:click={() => (backGallery = true)}
+            >{commonBack ? "Change card back" : "Choose card back"}<Icon
+              name="grid"
+              size={14}
+            /></button
           >
         </div>
-        <form
-          class="artwork-search"
-          on:submit|preventDefault={() => active && search(active)}
-        >
-          <label class="search-field"
-            ><Icon name="search" size={16} /><input
-              bind:value={artworkQuery}
-              aria-label="Artwork search name"
-            /></label
-          ><button
-            class="button secondary small"
-            disabled={searching ||
-              (active.face !== "common" && !artworkQuery.trim())}>Search</button
-          >
-        </form>
-        {#if searching}<p class="editor-help" role="status">
-            Searching MPC Autofill…
-          </p>{/if}
-        {#if searchError}<p class="notice error-notice" role="alert">
-            Search failed: {searchError}. You can try again; your draft is still
-            here.
-          </p>{/if}
-        {#if results}
-          <p class="editor-help">
-            {results.count} matching artworks · select an image to use it.
-          </p>
-          <div class="artwork-grid">
-            {#each results.cards as art}<button
-                class="artwork-choice"
-                on:click={() => choose(art)}
-                ><span class="artwork-thumb"
-                  ><img src={art.thumb} alt={art.label} loading="lazy" /></span
-                ><strong>{art.label}</strong><span
-                  >{art.source} · {art.dpi} DPI</span
-                ><span class="artwork-select-label">Use this artwork</span
-                ></button
-              >{/each}
-          </div>
-          {#if !results.cards.length}<p class="no-artwork">
-              No matching artwork. Try the card’s full name or a different
-              spelling.
-            </p>{/if}
-          <div class="artwork-pagination">
-            <button
-              class="button secondary small"
-              disabled={page === 0 || searching}
-              on:click={() => active && search(active, page - 1)}
-              >Previous</button
-            ><span>Page {page + 1}</span><button
-              class="button secondary small"
-              disabled={results.next_page === null || searching}
-              on:click={nextPage}>Next</button
-            >
-          </div>
-        {/if}
-      </section>
+      {/if}
     {/if}
   </div>
   <footer class="editor-footer">
     <span
-      >{mode === "create"
-        ? "Create your deck, then save it as an XML order."
-        : "Apply changes, then save your order as XML."}</span
-    ><button class="button secondary" disabled={busy} on:click={close}
+      ><span role="status"
+        >{!preview
+          ? "Your card previews will appear in the next step."
+          : loading.size
+            ? `Finding artwork for ${loading.size} image${loading.size === 1 ? "" : "s"}…`
+            : remaining.length
+              ? `${remaining.length} image${remaining.length === 1 ? " needs" : "s need"} artwork. Open a gallery to search.`
+              : needsBack
+                ? "Choose a common card back to finish your deck."
+                : mode === "create"
+                  ? "Ready to create. Save your deck as XML afterwards."
+                  : "Ready to apply. Save your order to keep these changes."}</span
+      >
+      {#if needsBack}<button
+          class="text-button footer-back-link"
+          disabled={busy}
+          on:click={() => (backGallery = true)}
+          >Browse card backs<Icon name="arrow" size={12} /></button
+        >{/if}
+    </span>
+    <button class="button secondary" disabled={busy} on:click={close}
       >Cancel</button
-    >{#if preview && !remaining.length}<button
+    >
+    {#if preview}<button
         class="button primary"
-        disabled={busy || needsBack || (mode === "create" && !orderName.trim())}
+        disabled={busy ||
+          !!loading.size ||
+          !!remaining.length ||
+          needsBack ||
+          (mode === "create" && !orderName.trim())}
         on:click={apply}
         >{busy
           ? "Applying…"
           : mode === "create"
             ? "Create deck"
             : "Apply changes"}<Icon name="check" size={16} /></button
-      >{:else}<button
+      >
+    {:else}<button
         class="button primary"
         disabled={busy || !text.trim()}
         on:click={review}
-        >{busy ? "Checking…" : "Review decklist"}<Icon
+        >{busy ? "Loading cards…" : "Choose artwork"}<Icon
           name="arrow"
           size={16}
         /></button
       >{/if}
   </footer>
 </dialog>
+{#if backGallery}<ArtworkGallery
+    search={artwork.search}
+    title="Choose a card back"
+    query={commonBack?.query ?? ""}
+    kind="cardback"
+    selected={commonBack}
+    on:close={() => (backGallery = false)}
+    on:choose={(event) => {
+      commonBack = event.detail;
+      backGallery = false;
+    }}
+  />{/if}

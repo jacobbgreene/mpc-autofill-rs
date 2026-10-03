@@ -55,8 +55,17 @@ to an existing project, order combining/splitting, PDF export, and save-to-accou
 ## Working with an order
 
 Start with **Import .txt decklist**, **Paste a decklist**, or drop a `.txt` file
-onto the welcome screen. Choose a name, cardstock and finish, select artwork for
-the listed cards, and browse MPC Autofill's cardback gallery for a common reverse.
+onto the welcome screen. Importing a file opens an artwork grid immediately;
+for pasted lists, select **Choose artwork**. Each new image starts with the first
+MPC Autofill match. Cycle through options using the arrows beside its preview or
+enter an artwork number. **Browse all artwork** opens a separate, paginated
+gallery with search and the current choice highlighted. The displayed image is
+the one used in your deck. Unmatched cards can be searched by another name in
+their gallery.
+
+Expand **Print settings** to choose a name, cardstock and finish, and browse the
+cardback gallery for a common reverse. **Edit decklist** returns to the text;
+artwork choices for matching names are retained when you change quantities.
 Explicit double-faced pairs keep their own backs. A common back is only required
 for cards without an explicit reverse.
 
