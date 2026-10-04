@@ -259,10 +259,36 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/image", listener.local_addr().unwrap());
         let server = std::thread::spawn(move || {
-            let (mut connection, _) = listener.accept().unwrap();
-            connection
-                .set_read_timeout(Some(Duration::from_secs(5)))
-                .unwrap();
+            let mut connection = accept_request(listener);
+            let _ = connection.write_all(&response);
+        });
+        (url, server)
+    }
+
+    fn accept_request(listener: std::net::TcpListener) -> std::net::TcpStream {
+        listener.set_nonblocking(true).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let connection = loop {
+            match listener.accept() {
+                Ok((connection, _)) => break connection,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "test server did not receive the expected request"
+                    );
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(error) => panic!("test server accept failed: {error}"),
+            }
+        };
+        connection.set_nonblocking(false).unwrap();
+        connection
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        connection
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        {
             let mut reader = BufReader::new(&connection);
             loop {
                 let mut line = String::new();
@@ -270,9 +296,8 @@ mod tests {
                     break;
                 }
             }
-            let _ = connection.write_all(&response);
-        });
-        (url, server)
+        }
+        connection
     }
 
     fn response(bytes: &[u8]) -> Vec<u8> {
@@ -331,18 +356,28 @@ mod tests {
     #[tokio::test]
     async fn corrupt_cache_is_replaced_only_after_a_complete_valid_download() {
         let directory = tempfile::tempdir().unwrap();
-        let destination = directory.path().join("preview.jpg");
+        // TempDir uses the ambient umask on Unix, so create the actual cache
+        // with the same private-directory contract as the application.
+        let cache = directory.path().join("cache");
+        cache::private_directory(&cache).unwrap();
+        let destination = cache.join("preview.jpg");
         std::fs::write(&destination, b"corrupt partial cache").unwrap();
         let (url, server) = serve(response(b"not an image"));
-        assert!(fetch_thumbnail(&build_client(), &url, &destination, 640)
+        let error = fetch_thumbnail(&build_client(), &url, &destination, 640)
             .await
-            .is_err());
+            .unwrap_err();
+        assert_eq!(
+            error,
+            image_proc::to_thumbnail(b"not an image", 640)
+                .unwrap_err()
+                .to_string()
+        );
         server.join().unwrap();
         assert_eq!(
             std::fs::read(&destination).unwrap(),
             b"corrupt partial cache"
         );
-        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+        assert_eq!(std::fs::read_dir(&cache).unwrap().count(), 1);
         let (url, server) = serve(response(&png()));
         fetch_thumbnail(&build_client(), &url, &destination, 640)
             .await
@@ -352,7 +387,7 @@ mod tests {
             image_proc::validate(&std::fs::read(destination).unwrap()).unwrap(),
             "jpg"
         );
-        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+        assert_eq!(std::fs::read_dir(&cache).unwrap().count(), 1);
     }
 
     #[tokio::test]
@@ -374,42 +409,37 @@ mod tests {
     #[tokio::test]
     async fn cancellation_removes_incomplete_staging_file() {
         let directory = tempfile::tempdir().unwrap();
+        let cache = directory.path().join("cache");
+        cache::private_directory(&cache).unwrap();
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/image", listener.local_addr().unwrap());
         let (release, waiting) = std::sync::mpsc::channel::<()>();
         let server = std::thread::spawn(move || {
-            let (mut connection, _) = listener.accept().unwrap();
-            connection
-                .set_read_timeout(Some(Duration::from_secs(5)))
-                .unwrap();
-            let mut reader = BufReader::new(&connection);
-            loop {
-                let mut line = String::new();
-                if reader.read_line(&mut line).unwrap() == 0 || line == "\r\n" {
-                    break;
-                }
-            }
+            let mut connection = accept_request(listener);
             connection
                 .write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\npart\r\n")
                 .unwrap();
             let _ = waiting.recv_timeout(Duration::from_secs(10));
         });
-        let destination = directory.path().join("image.jpg");
-        let task =
+        let destination = cache.join("image.jpg");
+        let mut task =
             tokio::spawn(
                 async move { fetch_thumbnail(&build_client(), &url, &destination, 640).await },
             );
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while std::fs::read_dir(directory.path()).unwrap().count() == 0 {
-                tokio::time::sleep(Duration::from_millis(1)).await;
+        tokio::select! {
+            result = &mut task => panic!("download ended before staging began: {result:?}"),
+            result = tokio::time::timeout(Duration::from_secs(5), async {
+                while std::fs::read_dir(&cache).unwrap().count() == 0 {
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+            }) => {
+                result.expect("download did not start staging within five seconds");
             }
-        })
-        .await
-        .unwrap();
+        }
         task.abort();
         assert!(task.await.unwrap_err().is_cancelled());
         drop(release);
         server.join().unwrap();
-        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+        assert_eq!(std::fs::read_dir(&cache).unwrap().count(), 0);
     }
 }

@@ -47,10 +47,14 @@ impl LocalArtwork {
     pub fn new(cache: &Path, order_path: &Path) -> Result<Self, String> {
         let root = cache.join("local-sessions");
         autofill_core::cache::private_directory(&root)?;
-        let directory = tempfile::Builder::new()
-            .prefix("approved-")
-            .tempdir_in(root)
-            .map_err(|e| e.to_string())?;
+        let mut builder = tempfile::Builder::new();
+        builder.prefix("approved-");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            builder.permissions(std::fs::Permissions::from_mode(0o700));
+        }
+        let directory = builder.tempdir_in(root).map_err(|e| e.to_string())?;
         Ok(Self {
             directory,
             base: order_path.parent().unwrap_or(Path::new("")).to_path_buf(),
@@ -327,6 +331,50 @@ mod tests {
             LocalArtwork::new(cache.path(), Path::new("elsewhere/order.xml")).unwrap();
         assert!(replacement.get("nonexistent.png").is_none());
         assert_ne!(session.directory.path(), replacement.directory.path());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn approval_session_is_private_without_changing_parent_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let cache = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(cache.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut session = LocalArtwork::new(cache.path(), &cache.path().join("order.xml")).unwrap();
+        for path in [
+            session.directory.path(),
+            &cache.path().join("local-sessions"),
+        ] {
+            assert_eq!(
+                std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+        }
+        let source = cache.path().join("chosen.png");
+        std::fs::write(&source, png()).unwrap();
+        let deck = order(&["chosen.png"]);
+        session
+            .review(&deck, "chosen.png", false, |path| async { Ok(Some(path)) })
+            .await
+            .unwrap()
+            .unwrap();
+        let snapshot = session.get("chosen.png").unwrap();
+        let preview = session.thumbnail_path("chosen.png").unwrap();
+        autofill_core::local_files::snapshot_thumbnail(snapshot, &preview, 640)
+            .await
+            .unwrap();
+        assert!(autofill_core::download::cached_thumbnail(&preview, 640)
+            .await
+            .unwrap());
+        assert_eq!(std::fs::read(snapshot).unwrap(), png());
+        assert_eq!(std::fs::read(source).unwrap(), png());
+        assert_eq!(
+            std::fs::metadata(cache.path())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755
+        );
     }
 
     #[tokio::test]
