@@ -140,7 +140,7 @@
               ({ payload }) => {
                 downloadCompleted = Math.min(
                   cards.length,
-                  downloadCompleted + 1,
+                  downloadCompleted + cards.filter(card => card.drive_id === payload.drive_id && (card.source ?? "GoogleDrive") === (payload.source ?? "GoogleDrive")).length,
                 );
                 if (!payload.ok) downloadFailures += 1;
                 patch(payload.drive_id, {

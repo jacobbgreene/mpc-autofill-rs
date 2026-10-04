@@ -25,7 +25,20 @@ pub fn image_key(source: &str, identifier: &str, variant: &str) -> String {
 /// Create private descendants without traversing a symlink or junction. Existing
 /// ancestors retain their permissions; this never changes the user's folders.
 pub fn private_directory(path: &Path) -> Result<(), String> {
-    open_directory(path, true).map(|_| ())
+    let directory = open_directory(path, true)?;
+    #[cfg(unix)]
+    {
+        use cap_std::fs::PermissionsExt;
+        let permissions = directory
+            .dir_metadata()
+            .map_err(|error| error.to_string())?
+            .permissions();
+        if permissions.mode() & 0o077 != 0 {
+            return Err("The app's private cache or browser directory allows access by other users. Choose a private location or restrict that directory's permissions before continuing.".into());
+        }
+    }
+    drop(directory);
+    Ok(())
 }
 
 pub(crate) fn open_directory(path: &Path, create: bool) -> Result<Dir, String> {
@@ -287,6 +300,47 @@ mod tests {
         }
         assert_eq!(std::fs::read(&dest).unwrap(), b"previous complete image");
         assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn final_private_directory_permissions_are_checked_without_changing_ancestors() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let shared_parent = directory.path().join("shared-parent");
+        std::fs::create_dir(&shared_parent).unwrap();
+        std::fs::set_permissions(&shared_parent, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let private = shared_parent.join("app-private");
+        private_directory(&private).unwrap();
+        assert_eq!(
+            std::fs::metadata(&private).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            std::fs::metadata(&shared_parent)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o777
+        );
+
+        for mode in [0o755, 0o770, 0o777] {
+            std::fs::set_permissions(&private, std::fs::Permissions::from_mode(mode)).unwrap();
+            assert!(private_directory(&private).is_err());
+            assert_eq!(
+                std::fs::metadata(&private).unwrap().permissions().mode() & 0o777,
+                mode
+            );
+        }
+
+        // Ordinary approved files can still be read from normal user folders.
+        let source = shared_parent.join("approved.png");
+        std::fs::write(&source, b"approved file fixture").unwrap();
+        assert_eq!(
+            read_bounded(&source, 1024).unwrap().unwrap(),
+            b"approved file fixture"
+        );
     }
 
     #[cfg(unix)]

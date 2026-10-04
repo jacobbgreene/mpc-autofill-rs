@@ -500,6 +500,17 @@ impl Session {
             .as_ref()
             .ok_or("image session is unavailable")?
             .approved_paths(order)?;
+        for (source, drive_id) in approved.keys() {
+            let _ = self.app.emit(
+                "download-progress",
+                DownloadEvent {
+                    drive_id: drive_id.clone(),
+                    source: *source,
+                    ok: true,
+                    error: None,
+                },
+            );
+        }
         self.downloaded.extend(approved);
         let client = download::build_client();
         let mut seen = HashSet::new();

@@ -50,10 +50,11 @@
 
 <style>
   .local-images { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; }
-  header, footer { padding: 20px; }
+  .local-images[open] { display: flex; flex-direction: column; }
+  header, footer { padding: 20px; flex-shrink: 0; }
   h2 { margin-top: 0; }
   p { line-height: 1.5; }
-  .local-image-list { overflow-y: auto; max-height: 45dvh; padding: 0 20px; }
+  .local-image-list { min-height: 0; flex: 1; overflow-y: auto; max-height: 45dvh; padding: 0 20px; }
   section { border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 12px; }
   code { display: block; overflow-wrap: anywhere; margin-top: 8px; }
   .local-image-actions { display: flex; flex-wrap: wrap; gap: 8px; }
