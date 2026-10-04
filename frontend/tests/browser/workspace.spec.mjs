@@ -54,8 +54,10 @@ async function launch(page) {
           if (window.__test.failDestroy) throw new Error("Window unavailable");
           return;
         }
-        if (command === "plugin:dialog|open")
+        if (command === "plugin:dialog|open") {
+          if (window.__test.blurOnFileDialog) document.activeElement?.blur();
           return window.__test.path ?? "C:/fixtures/deck.txt";
+        }
         if (command === "plugin:dialog|save")
           return (
             window.__test.savePath ??
@@ -803,6 +805,7 @@ test("a fresh file import offers one initial error navigation", async ({
   await paste(page, "1 Island");
   await page.evaluate(() => {
     window.__test.accept = true;
+    window.__test.blurOnFileDialog = true;
   });
   await page.getByRole("button", { name: "Import .txt", exact: true }).click();
   const text = page.getByLabel("Decklist", { exact: true });
@@ -811,6 +814,7 @@ test("a fresh file import offers one initial error navigation", async ({
       text.evaluate((el) => el.value.slice(el.selectionStart, el.selectionEnd)),
     )
     .toBe("1 Typo");
+  await expect(text).toBeFocused();
 });
 
 test("an unmatched result waits until the card-back gallery closes to focus text", async ({

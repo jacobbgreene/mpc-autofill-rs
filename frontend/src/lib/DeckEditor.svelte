@@ -218,13 +218,23 @@
     if (revision === undefined) stopAutoFocus();
     await tick();
     if (disposed) return false;
+    // Disabling Import while its native picker is open can leave focus on
+    // the document body. That is still this editor's import, unless another
+    // dialog has opened in the meantime.
+    const activeElement = document.activeElement;
+    const ownsFocus =
+      activeElement?.closest("dialog") === dialog ||
+      (activeElement === document.body &&
+        !Array.from(document.querySelectorAll("dialog[open]")).some(
+          (openDialog) => openDialog !== dialog,
+        ));
     if (
       revision !== undefined &&
       (revision !== textRevision ||
         focusImportRevision !== revision ||
         state.updating ||
         composing ||
-        document.activeElement?.closest("dialog") !== dialog)
+        !ownsFocus)
     )
       return false;
     const range = lineRange(text, line);
