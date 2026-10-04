@@ -47,7 +47,8 @@ nix develop --command env CHROME=/run/current-system/sw/bin/google-chrome-stable
 
 The `Release` GitHub Actions workflow checks the frontend and Rust workspace,
 builds a Windows NSIS installer plus Linux AppImage and Debian packages, and
-checks that the packaged applications start. Windows is tested after a silent
+checks that the packaged applications render and close through a native window
+close request within five seconds. Windows is tested after a silent
 installation; the Linux AppImage is extracted and started on a private display.
 These checks do not exercise a signed-in MakePlayingCards upload.
 
@@ -137,30 +138,81 @@ If the platform has no Documents directory, the default deck folder is `decks`
 inside the app data directory. Artwork thumbnails remain in the separate cache.
 
 Start with **Import .txt decklist**, **Paste a decklist**, or drop a `.txt` file
-onto the welcome screen. Importing a file opens an artwork grid immediately;
-for pasted lists, select **Choose artwork**. Each new image starts with the first
-MPC Autofill match. Cycle through options using the arrows beside its preview or
-enter an artwork number. Click its thumbnail to inspect the current art in a
-larger preview. **Browse all artwork** opens a separate gallery that loads more
-results as you scroll, with search and the current choice highlighted. Page
-controls remain available for direct navigation. The displayed image is
-the one used in your deck. Unmatched cards can be searched by another name in
-their gallery.
+onto the welcome screen. The text stays beside the artwork grid, and the preview
+updates 350 ms after typing pauses. At enlarged display scaling the panes stack;
+the action footer stays visible. The same workspace handles **Edit list** and
+**Replace deck**. Each successful new search selects its first match. Quantity
+changes, reordering, and unrelated corrections retain your artwork choices.
+**Edit list** also shows the artwork already saved with your deck, without looking
+it up again. At narrow widths, **Decklist** and **Artwork** jump buttons move
+between the stacked panes. Correcting an issue does not move your cursor to another
+issue or to the Apply button.
+
+Correct names and quantities in the numbered text editor. Problems link to their
+source lines; **Edit entry** or a tile's **Line** links focus and select that text.
+Repeated names share an artwork choice and link to every contributing line.
+After importing or pasting a complete list, the first unmatched entry is selected
+once in the text editor, with a prominent **Card not found** alert and marked line
+numbers. Typing or moving the caret cancels pending automatic navigation; further
+edits and search results leave your cursor alone. Error links remain available,
+and automatic navigation never takes focus from an open gallery.
+**Needs attention** includes pending, unmatched, and failed searches plus a missing
+common card back, text-validation problems, and preview failures. The **Card back** tile comes first in the artwork grid. Click its
+card-shaped preview or **Choose card back** button to browse backs. It then shows
+your chosen image, with **Change card back** available below. Its attention count
+clears after selection.
+Malformed
+lines do not hide valid entries, but counts are marked incomplete and Create/Apply
+stays disabled until the latest text and all required artwork are valid. Failed
+searches offer **Retry**; names are never automatically corrected or guessed.
+
+Cycle through artwork using the preview arrows or enter an artwork number. Click
+the thumbnail for a larger preview. **Choose different artwork** (or **Find
+artwork** for an unmatched entry) opens the gallery. **Search replacement artwork**
+searches only for images when you press Enter or Search: choosing one does not
+change the text entry's name. Use **Edit entry** in that gallery to return to its
+source line. A new search clears old results, and a failed search identifies the
+query with a retry action. Your previous selection stays selected until you choose
+another image. Card backs have a separate **Search card backs** field; an empty
+search browses all backs. Page controls and scrolling load additional results.
 
 Previews are cached locally, with fallback between MPC Autofill's image CDN and
 Google Drive. If a preview cannot load, use **Retry preview** on the card or
 **Retry failed previews** in its gallery.
 
-Expand **Print settings** to choose a name, cardstock and finish, and browse the
-cardback gallery for a common reverse. **Edit decklist** returns to the text;
-artwork choices for matching names are retained when you change quantities.
+Use the always-visible **Print settings** section at the top to choose a name,
+cardstock and finish.
+These settings are also available through **Edit list** or **Edit print settings**
+after creating a deck. Applying changes keeps them unsaved until **Save**. Deck
+names come from XML filenames, so a renamed deck opens **Save as…** with the new
+name suggested; the original file remains until you choose to replace it.
+
+The deck viewer shows both physical card and artwork-image counts. **All artwork**
+and **Backs** include the common back. Save status and the current filename remain
+visible under the deck name. **More** contains **Replace deck**, **Save as…**, and
+**Open order**. Missing thumbnails show **Retry preview** without blocking autofill.
+
+To stop autofill after Chrome opens, close that automation browser. The loaded
+deck remains available for editing or another run. An unfinished browser project
+may not have been saved by MakePlayingCards; **Start over** creates a new project.
+Error messages identify the failed stage and offer a next step, with technical
+details below. Closing Chrome does not cancel the earlier image-download stage.
+
+The final visual accessibility adjustments live in `frontend/src/accessibility.css`.
+To undo just those appearance changes, remove its import from `frontend/src/main.ts`.
+The workflow changes do not depend on that stylesheet.
 The suggested deck name is a placeholder that disappears as you type. Leave it
 empty to use the imported filename (or **New deck** for a pasted list).
 Explicit double-faced pairs keep their own backs. A common back is only required
 for cards without an explicit reverse.
 
-The appearance selector in the top bar offers **Light**, **Dark**, and **System**.
-Your choice is remembered between sessions; **System** follows your device theme.
+The appearance selector in the top bar offers **Light (Default)**, **Dark**, and
+**Zero**. Zero uses the charcoal and green dark palette from
+[czrd/zero.nvim](https://github.com/czrd/zero.nvim), with its MIT notice included
+in [the bundled theme license](frontend/public/zero-theme-LICENSE.txt).
+Your choice is remembered between sessions and does not follow device appearance.
+New installs and previously saved **System** preferences default to Light;
+explicit Light and Dark preferences are preserved.
 
 **Create deck** opens the completed draft in the card library. The first **Save**
 asks where to write its XML order; the imported text file stays unchanged. The
@@ -202,7 +254,16 @@ the same card name. Each order supports up to 612 cards.
 
 Applying a list updates the loaded order; **Save** writes it back as XML, and
 **Save as…** writes a separate XML. Stock, foil, and the common cardback are
-preserved. The app warns before discarding unsaved changes. Keyboard shortcuts:
+preserved. Closing the title-bar window (or Alt+F4 on Windows) closes a saved,
+idle deck immediately. Unsaved work offers **Discard and close** or **Keep
+editing**; an untouched empty editor needs no confirmation. During autofill the
+confirmation explains that closing stops the operation and closes its automation
+browser. Repeated close requests share one confirmation. A failed close offers
+Retry. Shutdown cancels network work, allows three seconds for graceful cleanup,
+and bounds final cleanup so process exit completes within five seconds. Browser
+profile selection and the existing Linux startup recovery behavior are unchanged.
+
+Keyboard shortcuts:
 `Ctrl/Cmd+F` searches cards, `Ctrl/Cmd+S` saves, and `Ctrl/Cmd+Shift+S` opens Save As.
 
 Frontend validation (Node 22.6+):
@@ -210,10 +271,32 @@ Frontend validation (Node 22.6+):
 ```sh
 npm --prefix frontend run check
 npm --prefix frontend test
+npm --prefix frontend exec -- playwright install chromium
+npm --prefix frontend run test:browser
 npm --prefix frontend run build
+cargo test --workspace --locked
 ```
 
-The normal Rust suite runs offline with `nix develop --command cargo test --workspace`.
+Browser tests mock Tauri commands and cover text correction, stale responses,
+artwork retention, gallery search, focus, close decisions, and light/dark layouts
+at 1100×820, 720×560 and a smaller CSS viewport representing enlarged scaling.
+On a machine with Chrome installed, `PLAYWRIGHT_CHANNEL=chrome` uses that browser
+instead of Playwright's Chromium. The separate browser-lifetime integration test
+uses isolated test profiles and only `about:blank`:
+
+```sh
+cargo test -p autofill-automation browser_shutdown_keeps_an_independent_browser_alive --locked -- --ignored
+```
+
+Before publishing the next patch, run both package smoke tests and exercise X /
+Alt+F4 on Windows and native close on Linux from the welcome screen, a saved deck,
+an unsaved import, a nested artwork gallery, and active autofill. Check both
+confirmation choices, automation-browser exit, and survival of an ordinary
+browser window. Include Linux restart after an interrupted autofill to check its
+existing recovery behavior. The mocked browser tests do not replace these native
+acceptance checks or a signed-in upload test. Publishing is a separate step.
+
+The normal Rust suite runs offline with `nix develop --command cargo test --workspace --locked`.
 An optional live artwork-search check is available with:
 
 ```sh

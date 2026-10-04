@@ -1,0 +1,87 @@
+/* Optional visual accessibility pass. Remove its import in main.ts to restore
+   the previous appearance without undoing any workflow changes. */
+:root {
+  --control-border: #8b879b;
+}
+:root[data-theme="dark"] {
+  --control-border: #727286;
+}
+:root[data-theme="zero"] {
+  --control-border: #757e90;
+}
+
+.button.secondary,
+.search-field,
+.new-order-settings input:not([type="checkbox"]),
+.new-order-settings select,
+.variant-field input,
+.theme-picker,
+.card-change-art {
+  border-color: var(--control-border);
+}
+.numbered-decklist:not(.has-problems) {
+  border-color: var(--control-border);
+}
+
+.button.small,
+.text-button,
+.filters button,
+.card-change-art {
+  min-height: 28px;
+}
+.icon-button {
+  min-width: 32px;
+  min-height: 32px;
+}
+.artwork-entry-links .text-button {
+  min-width: 28px;
+}
+button:focus-visible,
+summary:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.card-name,
+.card-dpi,
+.card-status,
+.card-change-art,
+.artwork-credit,
+.artwork-match-status,
+.cardback-help,
+.artwork-entry-links,
+.artwork-entry-links .text-button,
+.editor-help,
+.editor-footer > span,
+.settings-save-hint,
+.order-meta,
+.result-count,
+.progress-copy p,
+.step-track li,
+.filters button,
+.artwork-choice strong,
+.artwork-choice > span:not(.artwork-thumb) {
+  font-size: 12px;
+}
+.numbered-decklist textarea,
+.decklist-gutter {
+  font-size: 13px;
+}
+.face-label,
+.quantity-badge {
+  font-size: 11px;
+}
+
+@media (pointer: coarse) {
+  .button,
+  .text-button,
+  .icon-button,
+  .filters button,
+  .card-change-art {
+    min-height: 44px;
+  }
+  .icon-button {
+    min-width: 44px;
+  }
+}

@@ -1,12 +1,14 @@
-"""Launch a packaged app on a private X display and verify its window renders."""
+"""Verify a packaged app renders and exits within five seconds of native close."""
 import os
 from pathlib import Path
 import signal
+import re
 import struct
 import subprocess
 import sys
 import tempfile
 import time
+from Xlib import X, display as xdisplay, protocol
 
 binary = Path(sys.argv[1]).resolve()
 root = Path(tempfile.mkdtemp(prefix="mpc-package-smoke-"))
@@ -41,6 +43,7 @@ with (root / "xvfb.log").open("w") as xlog, (root / "app.log").open("w") as app_
             assert app.poll() is None, "App exited during startup"
             windows = subprocess.check_output(["xwininfo", "-root", "-tree"], env=env, text=True)
             if '"MPC Autofill"' in windows:
+                window = re.search(r'(0x[0-9a-f]+) "MPC Autofill"', windows).group(1)
                 break
         else:
             raise AssertionError("App did not create its main window")
@@ -57,13 +60,25 @@ with (root / "xvfb.log").open("w") as xlog, (root / "app.log").open("w") as app_
             start = offset + row * stride
             pixels.update(data[index:index + 4] for index in range(start, start + width * 4, 4))
         assert len(pixels) > 100, "App window did not render content"
-        print("PASS: Linux package stayed running and rendered its main window.")
+        # WM_DELETE_WINDOW is the native close request; do not terminate the
+        # process to satisfy the smoke test. Xvfb needs no window manager.
+        connection = xdisplay.Display(display)
+        target = connection.create_resource_object("window", int(window, 16))
+        target.send_event(protocol.event.ClientMessage(
+            window=target,
+            client_type=connection.intern_atom("WM_PROTOCOLS"),
+            data=(32, [connection.intern_atom("WM_DELETE_WINDOW"), X.CurrentTime, 0, 0, 0]),
+        ), event_mask=0)
+        connection.flush()
+        connection.close()
+        assert app.wait(timeout=5) == 0, "App failed during native close"
+        print("PASS: Linux package rendered and closed cleanly within five seconds.")
     except Exception:
         app_log.flush()
         print((root / "app.log").read_text(), file=sys.stderr)
         raise
     finally:
-        if app is not None:
+        if app is not None and app.poll() is None:
             try:
                 os.killpg(app.pid, signal.SIGTERM)
                 app.wait(timeout=5)

@@ -98,6 +98,7 @@ impl ArtworkThumbnails {
 pub async fn artwork_thumbnail(
     app: AppHandle,
     state: State<'_, ArtworkThumbnails>,
+    shutdown: State<'_, crate::shutdown::Shutdown>,
     drive_id: String,
 ) -> Result<String, String> {
     let directory = app
@@ -110,8 +111,8 @@ pub async fn artwork_thumbnail(
     app.asset_protocol_scope()
         .allow_directory(&directory, false)
         .map_err(|e| e.to_string())?;
-    state
-        .fetch(&directory, &drive_id, &preview_urls(&drive_id))
+    shutdown
+        .run(state.fetch(&directory, &drive_id, &preview_urls(&drive_id)))
         .await
         .map(|path| path.to_string_lossy().into_owned())
 }

@@ -20,8 +20,11 @@ struct RemoteDpi {
 /// Fetch original-image metadata by ID; preview dimensions are not print DPI.
 /// This also works for existing XML orders, which do not store artwork DPI.
 #[tauri::command]
-pub async fn artwork_dpi(drive_ids: Vec<String>) -> Result<HashMap<String, Option<u32>>, String> {
-    fetch_dpi(API, &drive_ids).await
+pub async fn artwork_dpi(
+    shutdown: tauri::State<'_, crate::shutdown::Shutdown>,
+    drive_ids: Vec<String>,
+) -> Result<HashMap<String, Option<u32>>, String> {
+    shutdown.run(fetch_dpi(API, &drive_ids)).await
 }
 
 async fn fetch_dpi(api: &str, ids: &[String]) -> Result<HashMap<String, Option<u32>>, String> {
@@ -147,14 +150,14 @@ mod tests {
     #[ignore = "requires access to the live MPC Autofill API"]
     async fn live_dpi_lookup_reads_original_smaug_artwork_resolution() {
         let id = "1iHSnZIulG-WsLa60PWG0nNVQJ4u6boke";
-        let values = artwork_dpi(vec![id.into()]).await.unwrap();
+        let values = fetch_dpi(API, &[id.into()]).await.unwrap();
         assert!(values[id].is_some_and(|dpi| dpi > 0));
     }
 
     #[tokio::test]
     #[ignore = "requires access to the live MPC Autofill API"]
     async fn live_artwork_search_returns_selectable_drive_images() {
-        let results = search_artwork("Lightning Bolt".into(), 0, None)
+        let results = fetch_artwork("Lightning Bolt".into(), 0, None)
             .await
             .unwrap();
         assert!(results.count > 0);
@@ -168,7 +171,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires access to the live MPC Autofill API"]
     async fn live_cardback_search_can_browse_without_a_query() {
-        let results = search_artwork(String::new(), 0, Some(SearchKind::Cardback))
+        let results = fetch_artwork(String::new(), 0, Some(SearchKind::Cardback))
             .await
             .unwrap();
         assert!(results.count > 0);
@@ -219,6 +222,15 @@ pub enum SearchKind {
 
 #[tauri::command]
 pub async fn search_artwork(
+    shutdown: tauri::State<'_, crate::shutdown::Shutdown>,
+    query: String,
+    page: u32,
+    kind: Option<SearchKind>,
+) -> Result<ArtworkResults, String> {
+    shutdown.run(fetch_artwork(query, page, kind)).await
+}
+
+async fn fetch_artwork(
     query: String,
     page: u32,
     kind: Option<SearchKind>,

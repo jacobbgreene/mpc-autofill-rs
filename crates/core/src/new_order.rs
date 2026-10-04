@@ -20,6 +20,49 @@ pub struct NewOrderOptions {
 }
 
 impl NewOrderOptions {
+    /// Validate all draft changes before the session replaces its loaded order.
+    pub fn revise(
+        &self,
+        current: &Order,
+        text: &str,
+        selections: &[ArtworkSelection],
+    ) -> Result<Order> {
+        let template = self.template()?;
+        let mut base = current.clone();
+        base.name = template.name;
+        base.details.stock = template.details.stock;
+        base.details.foil = template.details.foil;
+        if base.cardback_id.is_none() {
+            base.backs.extend(template.backs);
+            base.cardback_id = template.cardback_id;
+        }
+        // Resolve text against the original names first: mixed-back decklists
+        // can explicitly name the old common back on some lines.
+        let mut edited = base.edit_decklist(text, selections)?;
+        if let Some(back) = &self.cardback {
+            if edited.cardback_id.as_deref() != Some(&back.drive_id) {
+                if let Some(old_id) = edited
+                    .cardback_id
+                    .as_deref()
+                    .filter(|id| edited.backs.iter().any(|card| card.drive_id == *id))
+                {
+                    edited = edited.change_artwork(
+                        old_id,
+                        &ArtworkSelection {
+                            query: String::new(),
+                            face: "back".into(),
+                            drive_id: back.drive_id.clone(),
+                            name: back.name.clone(),
+                        },
+                    )?;
+                } else {
+                    edited.cardback_id = Some(back.drive_id.clone());
+                }
+            }
+        }
+        Ok(edited)
+    }
+
     fn template(&self) -> Result<Order> {
         let name = self.name.trim();
         if name.is_empty() || name.len() > 200 {
@@ -113,6 +156,109 @@ mod tests {
         assert_eq!(preview.unresolved.len(), 2);
         assert!(preview.needs_common_back);
     }
+
+    #[test]
+    fn revisions_validate_settings_and_text_atomically_and_preserve_artwork() {
+        let mut opts = options();
+        opts.cardback = Some(CardbackSelection {
+            drive_id: "common".into(),
+            name: "Common.png".into(),
+        });
+        let original = opts
+            .create(
+                "2 Island\n1 Delver | Insect",
+                &[
+                    art("Island", "front", "island"),
+                    art("Delver", "front", "delver"),
+                    art("Insect", "back", "insect"),
+                ],
+            )
+            .unwrap();
+        let text = original.to_decklist().unwrap();
+        assert_eq!(opts.revise(&original, &text, &[]).unwrap(), original);
+        opts.name = "Revised deck".into();
+        opts.stock = Cardstock::M31;
+        opts.foil = true;
+        let revised = opts.revise(&original, &text, &[]).unwrap();
+        assert_eq!(revised.name, "Revised deck");
+        assert_eq!(revised.details.stock, Cardstock::M31);
+        assert!(revised.details.foil);
+        assert_eq!(revised.fronts, original.fronts);
+        assert_eq!(revised.backs, original.backs);
+        let snapshot = original.clone();
+        assert!(opts.revise(&original, "0 Island", &[]).is_err());
+        opts.stock = Cardstock::P10;
+        assert!(opts.revise(&original, &text, &[]).is_err());
+        assert_eq!(original, snapshot);
+        opts.foil = false;
+        opts.cardback = Some(CardbackSelection {
+            drive_id: "new-common".into(),
+            name: "New.png".into(),
+        });
+        let revised = opts.revise(&original, &text, &[]).unwrap();
+        assert_eq!(
+            revised
+                .backs
+                .iter()
+                .find(|card| card.drive_id == "insect")
+                .unwrap()
+                .slots,
+            BTreeSet::from([2])
+        );
+        assert_eq!(
+            revised
+                .backs
+                .iter()
+                .find(|card| card.drive_id == "new-common")
+                .unwrap()
+                .slots,
+            BTreeSet::from([0, 1])
+        );
+    }
+
+    #[test]
+    fn changing_common_back_resolves_mixed_back_text_using_the_original_names() {
+        let mut opts = options();
+        opts.cardback = Some(CardbackSelection {
+            drive_id: "common".into(),
+            name: "Common.png".into(),
+        });
+        let original = opts
+            .create(
+                "1 Island | Insect\n1 Island",
+                &[
+                    art("Island", "front", "island"),
+                    art("Insect", "back", "insect"),
+                ],
+            )
+            .unwrap();
+        let text = original.to_decklist().unwrap();
+        assert!(text.contains("Island | Common"));
+        opts.cardback = Some(CardbackSelection {
+            drive_id: "replacement".into(),
+            name: "New back.png".into(),
+        });
+        let edited = opts.revise(&original, &text, &[]).unwrap();
+        assert_eq!(edited.fronts, original.fronts);
+        assert_eq!(
+            edited
+                .backs
+                .iter()
+                .find(|card| card.drive_id == "insect")
+                .unwrap()
+                .slots,
+            BTreeSet::from([0])
+        );
+        assert_eq!(
+            edited
+                .backs
+                .iter()
+                .find(|card| card.drive_id == "replacement")
+                .unwrap()
+                .slots,
+            BTreeSet::from([1])
+        );
+    }
     #[test]
     fn new_order_requires_artwork_and_back_before_creation() {
         assert!(options().create("2 Island", &[]).is_err());
@@ -171,7 +317,11 @@ mod tests {
     }
     #[test]
     fn invalid_settings_and_oversized_decks_are_rejected() {
-        assert!(options().preview("613 Island", &[]).is_err());
+        assert!(!options()
+            .preview("613 Island", &[])
+            .unwrap()
+            .issues
+            .is_empty());
         let mut opts = options();
         opts.name = " ".into();
         assert!(opts.preview("1 Island", &[]).is_err());
