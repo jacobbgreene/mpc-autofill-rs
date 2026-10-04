@@ -740,14 +740,11 @@ impl Session {
                     source: Source::LocalFile,
                     snapshot: Some(path.clone()),
                     url: String::new(),
-                    path: thumbs_dir.join(format!(
-                        "{}.jpg",
-                        autofill_core::cache::image_key(
-                            "local",
-                            &path.to_string_lossy(),
-                            "thumbnail-640-v2"
-                        )
-                    )),
+                    path: self
+                        .local_artwork
+                        .as_ref()
+                        .expect("snapshot has a session")
+                        .thumbnail_path(&card.drive_id),
                 });
             }
         }

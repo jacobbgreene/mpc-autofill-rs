@@ -61,6 +61,13 @@ impl LocalArtwork {
         self.grants.get(reference)
     }
 
+    pub fn thumbnail_path(&self, reference: &str) -> PathBuf {
+        self.directory.path().join(format!(
+            "{}.jpg",
+            autofill_core::cache::image_key("local", reference, "thumbnail-640-v2")
+        ))
+    }
+
     // This only manipulates path strings. It must never probe the original.
     pub fn resolve(&self, reference: &str) -> PathBuf {
         self.base.join(reference)
