@@ -206,13 +206,15 @@ empty to use the imported filename (or **New deck** for a pasted list).
 Explicit double-faced pairs keep their own backs. A common back is only required
 for cards without an explicit reverse.
 
-The appearance selector in the top bar offers **Light (Default)**, **Dark**, and
-**Zero**. Zero uses the charcoal and green dark palette from
+The appearance selector in the top bar offers **Light (Default)**, **Dark**,
+**Blue**, **Green**, **Purple**, **Pink**, **Orange**, **Teal**, **Sand**, and
+**Midnight**. Green uses the charcoal and green dark palette from
 [czrd/zero.nvim](https://github.com/czrd/zero.nvim), with its MIT notice included
 in [the bundled theme license](frontend/public/zero-theme-LICENSE.txt).
 Your choice is remembered between sessions and does not follow device appearance.
 New installs and previously saved **System** preferences default to Light;
-explicit Light and Dark preferences are preserved.
+explicit Light and Dark preferences are preserved. Previously saved **Zero**
+preferences migrate to **Green**.
 
 **Create deck** opens the completed draft in the card library. The first **Save**
 asks where to write its XML order; the imported text file stays unchanged. The

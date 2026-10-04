@@ -616,7 +616,7 @@
       {#if filter === "attention" && !state.updating}
         {#if state.error}<div class="draft-match-alert">
             <div>
-              <strong>Preview unavailable</strong>
+              <strong>Couldn’t prepare your deck preview</strong>
               <p>{state.error}</p>
               <button
                 class="text-button"

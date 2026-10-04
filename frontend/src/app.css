@@ -52,9 +52,103 @@
   --warning-soft: #332d23;
   --shadow: 0 4px 16px #00000012;
 }
+:root[data-theme="blue"],
+:root[data-theme="purple"],
+:root[data-theme="pink"],
+:root[data-theme="orange"],
+:root[data-theme="teal"],
+:root[data-theme="sand"] {
+  --button-bg: var(--accent);
+  --button-hover: var(--accent-hover);
+  --drop-border: var(--accent);
+}
+:root[data-theme="blue"] {
+  --bg: #f2f6fc;
+  --surface: #e7effb;
+  --text: #1d2b42;
+  --muted: #596b85;
+  --border: #d5e1f2;
+  --accent: #245db8;
+  --accent-hover: #194b9b;
+  --accent-soft: #e3edfc;
+}
+:root[data-theme="purple"] {
+  --bg: #f7f3fc;
+  --surface: #eee6f7;
+  --text: #342344;
+  --muted: #705c83;
+  --border: #e2d6ee;
+  --accent: #7942ac;
+  --accent-hover: #62328e;
+  --accent-soft: #eee2fb;
+}
+:root[data-theme="pink"] {
+  --bg: #fcf3f7;
+  --surface: #f8e6ef;
+  --text: #442736;
+  --muted: #825c6e;
+  --border: #eed5e1;
+  --accent: #ac326b;
+  --accent-hover: #902454;
+  --accent-soft: #fbe3ed;
+}
+:root[data-theme="orange"] {
+  --bg: #fcf5ee;
+  --surface: #f8eadd;
+  --text: #442d20;
+  --muted: #7e6452;
+  --border: #ecd9c8;
+  --accent: #a54c18;
+  --accent-hover: #873b10;
+  --accent-soft: #fce8d7;
+}
+:root[data-theme="teal"] {
+  --bg: #eff8f8;
+  --surface: #e0f0f0;
+  --text: #203c3f;
+  --muted: #526f72;
+  --border: #cfe3e4;
+  --accent: #1a7079;
+  --accent-hover: #125963;
+  --accent-soft: #daf0f2;
+}
+:root[data-theme="sand"] {
+  --bg: #f7f3eb;
+  --panel: #fffcf6;
+  --surface: #eee7da;
+  --text: #3b3429;
+  --muted: #756953;
+  --border: #dfd5c2;
+  --accent: #80602e;
+  --accent-hover: #664b22;
+  --accent-soft: #efe5d2;
+}
+:root[data-theme="midnight"] {
+  color-scheme: dark;
+  --bg: #101827;
+  --panel: #172338;
+  --surface: #21314b;
+  --text: #e6eefb;
+  --muted: #adbed9;
+  --border: #3a506e;
+  --accent: #90bbff;
+  --accent-hover: #b2d0ff;
+  --accent-soft: #263c5e;
+  --button-bg: #90bbff;
+  --button-hover: #b2d0ff;
+  --button-text: #101827;
+  --button-shadow: none;
+  --drop-border: #90bbff;
+  --ok: #77cfa9;
+  --fail: #ff9995;
+  --fail-soft: #372526;
+  --warning: #eac080;
+  --warning-soft: #332d23;
+  --shadow: 0 4px 16px #00000020;
+}
 /*! Zero palette adapted from https://github.com/czrd/zero.nvim (MIT).
  * License: /zero-theme-LICENSE.txt */
-:root[data-theme="zero"] {
+:root[data-theme="green"] {
   color-scheme: dark;
   --bg: #141519;
   --panel: #1c1d24;
@@ -77,16 +171,16 @@
   --warning-soft: #2b241a;
   --shadow: none;
 }
-:root[data-theme="zero"] ::selection {
+:root[data-theme="green"] ::selection {
   background: #2e3b33;
   color: #eef0f4;
 }
-:root[data-theme="zero"] .card-placeholder {
+:root[data-theme="green"] .card-placeholder {
   background: var(--surface);
 }
-:root[data-theme="zero"] .decor-card,
-:root[data-theme="zero"] .card-tile,
-:root[data-theme="zero"] .variant-arrow {
+:root[data-theme="green"] .decor-card,
+:root[data-theme="green"] .card-tile,
+:root[data-theme="green"] .variant-arrow {
   box-shadow: none;
 }
 * {
@@ -1002,7 +1096,8 @@ summary {
   height: calc(100% - 40px);
   position: absolute;
   inset: 0;
-  content-visibility: auto;
+  /* Keep loaded cards rendered: per-tile content-visibility caused repeated
+     paint/layer work during scrolling, especially with the hover transitions. */
 }
 .card-slot {
   position: relative;

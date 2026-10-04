@@ -1,0 +1,201 @@
+{
+  "browser": "154.0.8037.95",
+  "count": 612,
+  "repeats": 3,
+  "cpuRate": 4,
+  "deviceScaleFactor": 1.5,
+  "rows": [
+    {
+      "variant": "baseline",
+      "count": 612,
+      "repetition": 0,
+      "distance": 3800,
+      "TaskDuration": 2.821435,
+      "LayoutDuration": 0.056309,
+      "RecalcStyleDuration": 0.07578499999999999,
+      "ScriptDuration": 0.0067470000000000585,
+      "LayoutCount": 71,
+      "RecalcStyleCount": 132,
+      "frameP95": 41.600000000000364,
+      "frameP99": 42.399999999999636,
+      "framesOver12": 104,
+      "framesOver25": 96,
+      "frameCount": 124,
+      "visibilityChanges": 266,
+      "mutations": 0,
+      "heights": [
+        29818,
+        29818
+      ],
+      "traceTotalsMs": {
+        "Layout": 0,
+        "Paint": 0,
+        "RasterTask": 0,
+        "UpdateLayoutTree": 0,
+        "PrePaint": 0,
+        "ImageDecodeTask": 0
+      },
+      "errors": []
+    },
+    {
+      "variant": "visible",
+      "count": 612,
+      "repetition": 0,
+      "distance": 3800,
+      "TaskDuration": 0.91669,
+      "LayoutDuration": 0.002825999999999995,
+      "RecalcStyleDuration": 0.012032000000000015,
+      "ScriptDuration": 0.008463999999999916,
+      "LayoutCount": 3,
+      "RecalcStyleCount": 16,
+      "frameP95": 14.099999999999454,
+      "frameP99": 48.5,
+      "framesOver12": 25,
+      "framesOver25": 17,
+      "frameCount": 389,
+      "visibilityChanges": 0,
+      "mutations": 0,
+      "heights": [
+        29818,
+        29818
+      ],
+      "traceTotalsMs": {
+        "Layout": 0,
+        "Paint": 0,
+        "RasterTask": 0,
+        "UpdateLayoutTree": 0,
+        "PrePaint": 0,
+        "ImageDecodeTask": 0
+      },
+      "errors": []
+    },
+    {
+      "variant": "visible",
+      "count": 612,
+      "repetition": 1,
+      "distance": 3800,
+      "TaskDuration": 0.9229820000000002,
+      "LayoutDuration": 0.0032170000000000254,
+      "RecalcStyleDuration": 0.011441000000000007,
+      "ScriptDuration": 0.008735000000000048,
+      "LayoutCount": 3,
+      "RecalcStyleCount": 18,
+      "frameP95": 14,
+      "frameP99": 42,
+      "framesOver12": 26,
+      "framesOver25": 19,
+      "frameCount": 388,
+      "visibilityChanges": 0,
+      "mutations": 0,
+      "heights": [
+        29818,
+        29818
+      ],
+      "traceTotalsMs": {
+        "Layout": 0,
+        "Paint": 0,
+        "RasterTask": 0,
+        "UpdateLayoutTree": 0,
+        "PrePaint": 0,
+        "ImageDecodeTask": 0
+      },
+      "errors": []
+    },
+    {
+      "variant": "baseline",
+      "count": 612,
+      "repetition": 1,
+      "distance": 3800,
+      "TaskDuration": 2.821211,
+      "LayoutDuration": 0.05624300000000004,
+      "RecalcStyleDuration": 0.07393900000000003,
+      "ScriptDuration": 0.00905900000000004,
+      "LayoutCount": 75,
+      "RecalcStyleCount": 130,
+      "frameP95": 42,
+      "frameP99": 48.5,
+      "framesOver12": 105,
+      "framesOver25": 90,
+      "frameCount": 124,
+      "visibilityChanges": 266,
+      "mutations": 0,
+      "heights": [
+        29818,
+        29818
+      ],
+      "traceTotalsMs": {
+        "Layout": 0,
+        "Paint": 0,
+        "RasterTask": 0,
+        "UpdateLayoutTree": 0,
+        "PrePaint": 0,
+        "ImageDecodeTask": 0
+      },
+      "errors": []
+    },
+    {
+      "variant": "baseline",
+      "count": 612,
+      "repetition": 2,
+      "distance": 3800,
+      "TaskDuration": 2.835567,
+      "LayoutDuration": 0.06090899999999999,
+      "RecalcStyleDuration": 0.07286400000000001,
+      "ScriptDuration": 0.00605,
+      "LayoutCount": 76,
+      "RecalcStyleCount": 126,
+      "frameP95": 48.5,
+      "frameP99": 56.100000000000364,
+      "framesOver12": 102,
+      "framesOver25": 86,
+      "frameCount": 121,
+      "visibilityChanges": 266,
+      "mutations": 0,
+      "heights": [
+        29818,
+        29818
+      ],
+      "traceTotalsMs": {
+        "Layout": 0,
+        "Paint": 0,
+        "RasterTask": 0,
+        "UpdateLayoutTree": 0,
+        "PrePaint": 0,
+        "ImageDecodeTask": 0
+      },
+      "errors": []
+    },
+    {
+      "variant": "visible",
+      "count": 612,
+      "repetition": 2,
+      "distance": 3800,
+      "TaskDuration": 1.134839,
+      "LayoutDuration": 0.005705999999999989,
+      "RecalcStyleDuration": 0.014178999999999997,
+      "ScriptDuration": 0.010929999999999995,
+      "LayoutCount": 5,
+      "RecalcStyleCount": 20,
+      "frameP95": 34.399999999999636,
+      "frameP99": 55,
+      "framesOver12": 28,
+      "framesOver25": 21,
+      "frameCount": 372,
+      "visibilityChanges": 0,
+      "mutations": 0,
+      "heights": [
+        29818,
+        29818
+      ],
+      "traceTotalsMs": {
+        "Layout": 0,
+        "Paint": 0,
+        "RasterTask": 0,
+        "UpdateLayoutTree": 0,
+        "PrePaint": 0,
+        "ImageDecodeTask": 0
+      },
+      "errors": []
+    }
+  ]
+}

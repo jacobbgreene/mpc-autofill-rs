@@ -651,9 +651,16 @@ test("save and thumbnail failures stay specific, retryable, and preserve the dec
 }) => {
   await launch(page);
   await page.evaluate(() => {
+    window.__test.manualThumbnails = true;
     window.__test.thumbFailure = true;
   });
   await openSavedDeck(page);
+  await expect(page.locator(".card-tile").first()).toContainText("Loading card artwork…");
+  await page.evaluate(async () => {
+    window.__test.manualThumbnails = false;
+    await window.__TAURI_INTERNALS__.invoke("thumbnails");
+  });
+  await expect(page.locator(".card-tile").first()).toContainText("Couldn’t load card artwork. Retry below.");
   await expect(
     page.getByRole("button", { name: "Retry preview for Island", exact: true }),
   ).toBeVisible();
@@ -722,7 +729,7 @@ test("closing the automation browser restores editing and allows another run", a
   ).toBe(2);
 });
 
-for (const theme of ["light", "dark", "zero"])
+for (const theme of ["light", "dark", "green"])
   test(`compact saved deck shows artwork at 720x560 in ${theme}`, async ({
     page,
   }, testInfo) => {
@@ -1392,7 +1399,14 @@ test("appearance defaults to Light independently of device settings and migrates
   await expect(picker.locator("option")).toHaveText([
     "Light (Default)",
     "Dark",
-    "Zero",
+    "Blue",
+    "Green",
+    "Purple",
+    "Pink",
+    "Orange",
+    "Teal",
+    "Sand",
+    "Midnight",
   ]);
   await expect(picker).toHaveValue("light");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
@@ -1405,6 +1419,10 @@ test("appearance defaults to Light independently of device settings and migrates
     await expect(picker).toHaveValue("light");
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   }
+  await page.evaluate(() => localStorage.setItem("mpc-autofill-theme", "zero"));
+  await page.reload();
+  await expect(picker).toHaveValue("green");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "green");
 });
 
 test("each appearance persists across reloads and ignores device theme changes", async ({
@@ -1412,7 +1430,7 @@ test("each appearance persists across reloads and ignores device theme changes",
 }, testInfo) => {
   const errors = await launch(page);
   const picker = page.getByRole("combobox", { name: "Appearance" });
-  for (const theme of ["dark", "light", "zero"]) {
+  for (const theme of ["dark", "light", "blue", "purple", "pink", "orange", "teal", "sand", "midnight", "green"]) {
     await picker.selectOption(theme);
     await page.reload();
     await expect(picker).toHaveValue(theme);
@@ -1420,59 +1438,61 @@ test("each appearance persists across reloads and ignores device theme changes",
     await page.emulateMedia({ colorScheme: "dark" });
     await page.emulateMedia({ colorScheme: "light" });
     await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
-  }
-  const colors = await page.evaluate(() => {
-    const style = getComputedStyle(document.documentElement);
-    return Object.fromEntries(
-      [
-        "--text",
-        "--bg",
-        "--muted",
-        "--panel",
-        "--accent",
-        "--accent-soft",
-        "--button-text",
-        "--button-bg",
-        "--fail",
-        "--fail-soft",
-        "--warning",
-        "--warning-soft",
-      ].map((key) => [key, style.getPropertyValue(key).trim()]),
-    );
-  });
-  const luminance = (hex) => {
-    const rgb = hex
-      .slice(1)
-      .match(/../g)
-      .map((channel) => {
-        const value = parseInt(channel, 16) / 255;
-        return value <= 0.04045
-          ? value / 12.92
-          : ((value + 0.055) / 1.055) ** 2.4;
-      });
-    return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
-  };
-  for (const [foreground, background] of [
-    ["--text", "--bg"],
-    ["--muted", "--panel"],
-    ["--accent", "--accent-soft"],
-    ["--button-text", "--button-bg"],
-    ["--fail", "--fail-soft"],
-    ["--warning", "--warning-soft"],
-  ]) {
-    const values = [
-      luminance(colors[foreground]),
-      luminance(colors[background]),
-    ].sort((a, b) => b - a);
-    expect(
-      (values[0] + 0.05) / (values[1] + 0.05),
-      `${foreground} on ${background}`,
-    ).toBeGreaterThanOrEqual(4.5);
+    const colors = await page.evaluate(() => {
+      const style = getComputedStyle(document.documentElement);
+      return Object.fromEntries(
+        [
+          "--text",
+          "--bg",
+          "--muted",
+          "--panel",
+          "--accent",
+          "--accent-soft",
+          "--button-text",
+          "--button-bg",
+          "--fail",
+          "--fail-soft",
+          "--warning",
+          "--warning-soft",
+        ].map((key) => [key, style.getPropertyValue(key).trim()]),
+      );
+    });
+    const luminance = (hex) => {
+      if (hex.length === 4) hex = "#" + [...hex.slice(1)].map((value) => value + value).join("");
+      const rgb = hex
+        .slice(1)
+        .match(/../g)
+        .map((channel) => {
+          const value = parseInt(channel, 16) / 255;
+          return value <= 0.04045
+            ? value / 12.92
+            : ((value + 0.055) / 1.055) ** 2.4;
+        });
+      return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+    };
+    for (const [foreground, background] of [
+      ["--text", "--bg"],
+      ["--muted", "--panel"],
+      ["--accent", "--accent-soft"],
+      ["--button-text", "--button-bg"],
+      ["--fail", "--fail-soft"],
+      ["--warning", "--warning-soft"],
+    ]) {
+      const values = [
+        luminance(colors[foreground]),
+        luminance(colors[background]),
+      ].sort((a, b) => b - a);
+      expect(
+        (values[0] + 0.05) / (values[1] + 0.05),
+        `${theme}: ${foreground} on ${background}`,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+    await page.screenshot({ path: testInfo.outputPath(`${theme}-welcome.png`) });
   }
   await expect(
     page.getByRole("button", { name: "Import .txt decklist", exact: true }),
   ).toHaveCSS("background-color", "rgb(54, 224, 126)");
-  await page.screenshot({ path: testInfo.outputPath("zero-welcome.png") });
+  await page.screenshot({ path: testInfo.outputPath("green-welcome.png") });
   expect(errors).toEqual([]);
 });
 
@@ -1490,8 +1510,8 @@ test("appearance can still change when preference storage is unavailable", async
   const errors = await launch(page);
   const picker = page.getByRole("combobox", { name: "Appearance" });
   await expect(picker).toHaveValue("light");
-  await picker.selectOption("zero");
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "zero");
+  await picker.selectOption("green");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "green");
   expect(errors).toEqual([]);
 });
 
@@ -1500,7 +1520,7 @@ for (const [width, height] of [
   [720, 560],
   [550, 410],
 ])
-  for (const theme of ["light", "dark", "zero"]) {
+  for (const theme of ["light", "dark", "green"]) {
     test(`workspace remains usable at ${width}x${height} in ${theme}`, async ({
       page,
     }, testInfo) => {

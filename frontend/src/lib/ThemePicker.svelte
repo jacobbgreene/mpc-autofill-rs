@@ -1,13 +1,13 @@
 <script lang="ts">
   import Icon from "./Icon.svelte";
-  import { readTheme, saveTheme } from "./theme";
+  import { readTheme, saveTheme, themes } from "./theme";
 
   let theme = readTheme();
 </script>
 
 <label class="theme-picker" title="Appearance">
   <Icon
-    name={theme === "dark" ? "moon" : theme === "light" ? "sun" : "leaf"}
+    name={themes.find((option) => option.value === theme)?.icon ?? "sun"}
     size={15}
   />
   <select
@@ -15,8 +15,8 @@
     bind:value={theme}
     on:change={() => saveTheme(theme)}
   >
-    <option value="light">Light (Default)</option>
-    <option value="dark">Dark</option>
-    <option value="zero">Zero</option>
+    {#each themes as option}
+      <option value={option.value}>{option.label}</option>
+    {/each}
   </select>
 </label>

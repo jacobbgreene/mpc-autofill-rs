@@ -1,0 +1,354 @@
+{
+  "date": "2026-10-04",
+  "baselineRevision": "3d10da3",
+  "finding": "Per-card content-visibility:auto creates avoidable painting and layer work during fully loaded deck scrolling, amplified by existing hover transitions. No card DOM mutations occurred in any measured scroll. The diagnostic trace recorded zero ImageDecodeTask events.",
+  "change": "Remove content-visibility:auto from .card-tile. Keep native image lazy loading, cached preview resolution, stable slot geometry and all existing hover/keyboard behavior.",
+  "method": {
+    "browser": "154.0.8037.95",
+    "platform": "Windows, headless installed Chrome",
+    "build": "Production Vite build, same JS and CSS except the tested override",
+    "viewport": "1100x820 CSS pixels",
+    "fixture": "Distinct deterministic 458x640 JPEGs; mock Tauri transport; eager load and decode every image, visit entire grid, then settle before recording. All fixtures have one front image per slot; 1224 is a synthetic grid-size stress test matching the image count of 612 distinct front/back pairs, not a backend-valid order.",
+    "scroll": "3800 CSS pixels down and back at 2400 pixels/second, stationary pointer over first column; CDP synthesized mouse scrolling; alternating variant order",
+    "metrics": "TaskDuration in seconds is renderer main-thread work. Frame intervals in ms are requestAnimationFrame observations, not presented-frame telemetry. readyMs measures opening through creation of all image DOM nodes, not completion of image loading. JS heap excludes decoded image and GPU memory."
+  },
+  "variantDefinitions": {
+    "baseline": ".card-tile content-visibility:auto",
+    "visible": "Diagnostic override to content-visibility:visible before source edit",
+    "candidate": "Actual production build with property removed",
+    "noHover": "Diagnostic only: baseline with artwork/preview hint transitions and hover lift/shadow disabled"
+  },
+  "series": [
+    {
+      "file": "results-100.json",
+      "count": 100,
+      "cpuRate": 1,
+      "deviceScaleFactor": 1,
+      "variants": {
+        "baseline": {
+          "samples": 3,
+          "TaskDuration": {
+            "median": 0.518947,
+            "min": 0.507705,
+            "max": 0.580309
+          },
+          "frameP95": {
+            "median": 7.100000000000023,
+            "min": 7.100000000000023,
+            "max": 7.100000000000136
+          },
+          "framesOver25": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "LayoutCount": {
+            "median": 66,
+            "min": 63,
+            "max": 70
+          }
+        },
+        "visible": {
+          "samples": 3,
+          "TaskDuration": {
+            "median": 0.113736,
+            "min": 0.111958,
+            "max": 0.12206900000000001
+          },
+          "frameP95": {
+            "median": 7.100000000000023,
+            "min": 7.100000000000023,
+            "max": 7.100000000000136
+          },
+          "framesOver25": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "LayoutCount": {
+            "median": 2,
+            "min": 2,
+            "max": 2
+          }
+        },
+        "noHover": {
+          "samples": 3,
+          "TaskDuration": {
+            "median": 0.16267700000000002,
+            "min": 0.16041699999999998,
+            "max": 0.16659100000000002
+          },
+          "frameP95": {
+            "median": 7.100000000000136,
+            "min": 7.100000000000023,
+            "max": 7.100000000000136
+          },
+          "framesOver25": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "LayoutCount": {
+            "median": 32,
+            "min": 32,
+            "max": 32
+          }
+        }
+      }
+    },
+    {
+      "file": "results-612.json",
+      "count": 612,
+      "cpuRate": 4,
+      "deviceScaleFactor": 1.5,
+      "variants": {
+        "baseline": {
+          "samples": 3,
+          "TaskDuration": {
+            "median": 2.821435,
+            "min": 2.821211,
+            "max": 2.835567
+          },
+          "frameP95": {
+            "median": 42,
+            "min": 41.600000000000364,
+            "max": 48.5
+          },
+          "frameP99": {
+            "median": 48.5,
+            "min": 42.399999999999636,
+            "max": 56.100000000000364
+          },
+          "framesOver25": {
+            "median": 90,
+            "min": 86,
+            "max": 96
+          },
+          "LayoutCount": {
+            "median": 75,
+            "min": 71,
+            "max": 76
+          }
+        },
+        "visible": {
+          "samples": 3,
+          "TaskDuration": {
+            "median": 0.9229820000000002,
+            "min": 0.91669,
+            "max": 1.134839
+          },
+          "frameP95": {
+            "median": 14.099999999999454,
+            "min": 14,
+            "max": 34.399999999999636
+          },
+          "frameP99": {
+            "median": 48.5,
+            "min": 42,
+            "max": 55
+          },
+          "framesOver25": {
+            "median": 19,
+            "min": 17,
+            "max": 21
+          },
+          "LayoutCount": {
+            "median": 3,
+            "min": 3,
+            "max": 5
+          }
+        }
+      }
+    },
+    {
+      "file": "candidate-100.json",
+      "count": 100,
+      "cpuRate": 4,
+      "deviceScaleFactor": 1.5,
+      "variants": {
+        "baseline": {
+          "samples": 3,
+          "TaskDuration": {
+            "median": 1.8566410000000002,
+            "min": 1.756605,
+            "max": 1.8572349999999997
+          },
+          "frameP95": {
+            "median": 14.099999999999909,
+            "min": 14,
+            "max": 14.099999999999909
+          },
+          "frameP99": {
+            "median": 14.5,
+            "min": 14.100000000000136,
+            "max": 20.5
+          },
+          "framesOver25": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "LayoutCount": {
+            "median": 63,
+            "min": 62,
+            "max": 66
+          },
+          "readyMs": {
+            "median": 400,
+            "min": 375,
+            "max": 432
+          },
+          "heapMiB": {
+            "median": 15.789291381835938,
+            "min": 15.784717559814453,
+            "max": 15.79449462890625
+          }
+        },
+        "candidate": {
+          "samples": 3,
+          "TaskDuration": {
+            "median": 0.44401500000000005,
+            "min": 0.43333699999999997,
+            "max": 0.45877899999999994
+          },
+          "frameP95": {
+            "median": 7.100000000000364,
+            "min": 7.100000000000136,
+            "max": 7.100000000000364
+          },
+          "frameP99": {
+            "median": 7.837999999999965,
+            "min": 7.5,
+            "max": 14.099999999999909
+          },
+          "framesOver25": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "LayoutCount": {
+            "median": 3,
+            "min": 3,
+            "max": 3
+          },
+          "readyMs": {
+            "median": 449,
+            "min": 445,
+            "max": 470
+          },
+          "heapMiB": {
+            "median": 15.740318298339844,
+            "min": 15.713680267333984,
+            "max": 15.751167297363281
+          }
+        }
+      }
+    },
+    {
+      "file": "candidate-1224.json",
+      "count": 1224,
+      "cpuRate": 4,
+      "deviceScaleFactor": 1.5,
+      "variants": {
+        "baseline": {
+          "samples": 2,
+          "TaskDuration": {
+            "median": 3.0489999999999995,
+            "min": 3.044142,
+            "max": 3.053857999999999
+          },
+          "frameP95": {
+            "median": 64.14999999999964,
+            "min": 59.70000000000073,
+            "max": 68.59999999999854
+          },
+          "frameP99": {
+            "median": 73.75,
+            "min": 70,
+            "max": 77.5
+          },
+          "framesOver25": {
+            "median": 67,
+            "min": 64,
+            "max": 70
+          },
+          "LayoutCount": {
+            "median": 70,
+            "min": 70,
+            "max": 70
+          },
+          "readyMs": {
+            "median": 1669.5,
+            "min": 1646,
+            "max": 1693
+          },
+          "heapMiB": {
+            "median": 144.67502975463867,
+            "min": 144.45915603637695,
+            "max": 144.8909034729004
+          }
+        },
+        "candidate": {
+          "samples": 2,
+          "TaskDuration": {
+            "median": 1.4342394999999994,
+            "min": 1.1261449999999993,
+            "max": 1.7423339999999996
+          },
+          "frameP95": {
+            "median": 34.95000000000073,
+            "min": 20.900000000001455,
+            "max": 49
+          },
+          "frameP99": {
+            "median": 66.05000000000018,
+            "min": 55.600000000000364,
+            "max": 76.5
+          },
+          "framesOver25": {
+            "median": 21.5,
+            "min": 18,
+            "max": 25
+          },
+          "LayoutCount": {
+            "median": 7,
+            "min": 3,
+            "max": 11
+          },
+          "readyMs": {
+            "median": 2278,
+            "min": 2237,
+            "max": 2319
+          },
+          "heapMiB": {
+            "median": 144.56562042236328,
+            "min": 144.5627098083496,
+            "max": 144.56853103637695
+          }
+        }
+      }
+    }
+  ],
+  "interpretation": "100-image candidate at 4x CPU throttling/1.5 DPR reduces median renderer task work from 1.857s to 0.444s (76%). 612-image diagnostic at the same settings reduces median p95 frame interval from 42ms to 14.1ms; slow frames above 25ms fall from median 90 to 19. Unthrottled 100-image runs had no frames above 25ms in either variant, so an unthrottled stutter is not claimed.",
+  "tradeoffs": "Rendering all card contents increases up-front work: 100-image DOM readiness median 400ms to 449ms; 1224-item stress median 1669.5ms to 2278ms under 4x CPU throttling. JS heap remained roughly unchanged; total renderer/GPU memory was not measured. The largest stress fixture still has occasional long frames after the fix.",
+  "checks": {
+    "sourceDiff": "Only .card-tile content-visibility removed plus explanatory comment",
+    "layout": "Document scroll height unchanged across all measured runs",
+    "runtime": "No page errors or card DOM mutations during measured scrolling",
+    "visual": "Reviewed candidate-1224.png: artwork, names, DPI, status, artwork buttons and sticky toolbar render correctly",
+    "svelte": "0 errors, 0 warnings",
+    "unitTests": "30 passed",
+    "productionBuild": "Passed",
+    "browserTests": "44 passed, exit 0 (Chrome); test-owned Vite process stopped to release Windows web-server teardown"
+  },
+  "reproduction": [
+    "From frontend: node node_modules/vite/bin/vite.js build",
+    "From repo root (PowerShell): $env:CPU=\"4\"; $env:DPR=\"1.5\"; $env:REPEATS=\"3\"; $env:OUTPUT=\"candidate-100.json\"; node performance/deck-scroll-2026-10-04/measure.mjs",
+    "Set CARDS to 612 or 1224 for larger grids. Set TRACE=1 to save local ignored Chrome traces. The diagnostic variants visible and noHover are selectable with VARIANTS. Defaults: CARDS=100, CPU=1, DPR=1, REPEATS=3, VARIANTS=baseline,candidate, PLAYWRIGHT_CHANNEL=chrome."
+  ],
+  "limitations": [
+    "Synthetic JPEGs and mocked IPC isolate fully loaded rendering; this is not a live-network or native WebView2 measurement.",
+    "Three paired runs per main series and two pairs for 1224-item stress; observed ranges are retained, not a statistical guarantee.",
+    "No native application rebuild or installer change was performed."
+  ]
+}

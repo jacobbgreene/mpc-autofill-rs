@@ -62,10 +62,10 @@
         <div class="card-placeholder">
           <Icon name="image" size={44} /><span
             >{card?.source === "LocalFile"
-              ? card.local_approved ? "Local image preview unavailable." : "Allow this image in Review local images to see a preview."
+              ? card.local_approved ? "Couldn’t open this local image. Check it in Review local images." : "Allow this image in Review local images to see its artwork."
               : card?.thumbStatus === "failed" || broken
-                ? "Preview unavailable."
-                : "Loading preview…"}</span
+                ? "Couldn’t load card artwork. Use Retry preview to try again."
+                : "Loading card artwork…"}</span
           >
         </div>
       {/if}
