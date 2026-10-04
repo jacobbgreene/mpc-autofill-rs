@@ -58,12 +58,11 @@ async function scenario(name, exercise) {
   }
 }
 await scenario('saved deck native close', async page => {
-  // Stub only the system file picker; the load, parse, summary and UI use real IPC.
-  await page.evaluate(path => {
-    const original = window.__TAURI_INTERNALS__.invoke;
-    window.__TAURI_INTERNALS__.invoke = (command, args) => command === 'plugin:dialog|open' ? Promise.resolve(path) : original(command, args);
-  }, orderPath);
-  await page.getByRole('button', { name: /Open.*file|Open.*order/i }).first().click();
+  // Deliver a fixture drop through Tauri's real event bridge; loading, parsing,
+  // summaries and closing use the installed application's real IPC handlers.
+  await page.evaluate(path => window.__TAURI_INTERNALS__.invoke('plugin:event|emit', {
+    event: 'tauri://drag-drop', payload: { paths: [path], position: { x: 0, y: 0 } },
+  }), orderPath);
   await expect(page.getByText('Native fixture', { exact: true })).toBeVisible();
   await expect(page.getByText('Saved', { exact: true })).toBeVisible();
 });
