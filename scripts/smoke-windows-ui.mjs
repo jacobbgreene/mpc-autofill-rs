@@ -28,20 +28,20 @@ async function scenario(name, exercise) {
   const port = await freePort();
   const app = spawn(binary, [], { windowsHide: true, stdio: 'ignore', env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}` } });
   let browser;
+  let page;
+  const errors = [];
   try {
     for (let i = 0; i < 80; i++) {
       if (app.exitCode !== null) throw new Error(`App exited during ${name}`);
       try { browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 1000 }); break; } catch { await wait(250); }
     }
     assert(browser, 'Installed WebView2 did not expose its test endpoint');
-    let page;
     for (let i = 0; i < 40; i++) {
       page = browser.contexts().flatMap(context => context.pages()).find(page => /tauri|localhost/.test(page.url()));
       if (page) break;
       await wait(250);
     }
     assert(page, 'Installed app did not create its WebView page');
-    const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await expect(page.getByRole('button', { name: 'Paste a decklist', exact: true })).toBeEnabled({ timeout: 15000 });
     const confirmation = await exercise(page, app);
@@ -52,6 +52,13 @@ async function scenario(name, exercise) {
     assert.equal(app.exitCode, 0, `${name}: process must exit cleanly within five seconds`);
     assert.deepEqual(errors, [], `${name}: no WebView runtime errors`);
     console.log(`PASS: installed Windows app — ${name}`);
+  } catch (error) {
+    console.error(`${name}: WebView runtime errors: ${JSON.stringify(errors)}`);
+    if (page && !page.isClosed()) {
+      const state = await page.locator('body').innerText({ timeout: 3000 }).catch(() => 'WebView state unavailable');
+      console.error(`${name}: fixture UI state: ${state.slice(0, 6000)}`);
+    }
+    throw error;
   } finally {
     await browser?.close().catch(() => {});
     if (app.exitCode === null) app.kill(); // Failure cleanup never satisfies a test.

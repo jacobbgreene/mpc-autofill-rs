@@ -266,31 +266,29 @@ mod tests {
 
     const XML: &str = "<order><details><quantity>3</quantity><stock>(S30) Standard Smooth</stock><foil>false</foil></details><fronts><card><id>front-art</id><slots>0,1,2</slots><name>Island.png</name></card></fronts><cardback>back-art</cardback></order>";
 
-    struct Fixture(PathBuf);
+    struct Fixture(tempfile::TempDir);
     impl Fixture {
         fn new() -> Self {
-            let stamp = std::time::SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
-            let path =
-                std::env::temp_dir().join(format!("mpc-library-{}-{stamp}", std::process::id()));
-            std::fs::create_dir_all(path.join("Documents")).unwrap();
-            Self(path)
+            // Atomic creation provides isolation even when concurrent tests
+            // observe the same timestamp on a virtualized CI clock.
+            let directory = tempfile::Builder::new()
+                .prefix("mpc-library-")
+                .tempdir()
+                .unwrap();
+            std::fs::create_dir(directory.path().join("Documents")).unwrap();
+            Self(directory)
         }
         fn library(&self) -> SavedDecks {
-            SavedDecks::new(self.0.join("data"), Some(self.0.join("Documents")))
+            SavedDecks::new(
+                self.0.path().join("data"),
+                Some(self.0.path().join("Documents")),
+            )
         }
         fn deck(&self, relative: &str) -> PathBuf {
-            let path = self.0.join(relative);
+            let path = self.0.path().join(relative);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, XML).unwrap();
             path
-        }
-    }
-    impl Drop for Fixture {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
         }
     }
 
@@ -301,7 +299,11 @@ mod tests {
         let legacy = fixture.deck("Documents/Old deck.XML");
         let managed = fixture.deck("Documents/MPC Autofill/Decks/New deck.xml");
         fixture.deck("Documents/unrelated/nested.xml");
-        std::fs::write(fixture.0.join("Documents/settings.xml"), "<settings/>").unwrap();
+        std::fs::write(
+            fixture.0.path().join("Documents/settings.xml"),
+            "<settings/>",
+        )
+        .unwrap();
         let listing = library.list().await.unwrap();
         assert_eq!(listing.decks.len(), 2);
         assert!(listing.warning.is_none());
@@ -397,7 +399,10 @@ mod tests {
         let path = library.default_path("My deck.xml").await.unwrap();
         assert_eq!(
             PathBuf::from(path),
-            fixture.0.join("Documents/MPC Autofill/Decks/My deck.xml")
+            fixture
+                .0
+                .path()
+                .join("Documents/MPC Autofill/Decks/My deck.xml")
         );
         assert!(library.folder.is_dir());
         for invalid in [
@@ -408,8 +413,8 @@ mod tests {
         ] {
             assert!(library.default_path(invalid).await.is_err());
         }
-        let fallback = SavedDecks::new(fixture.0.join("data"), None);
-        assert_eq!(fallback.folder, fixture.0.join("data/decks"));
+        let fallback = SavedDecks::new(fixture.0.path().join("data"), None);
+        assert_eq!(fallback.folder, fixture.0.path().join("data/decks"));
     }
 
     #[tokio::test]
@@ -445,7 +450,7 @@ mod tests {
     async fn listing_rejects_hostile_xml_without_modifying_decks_or_nearby_files() {
         let fixture = Fixture::new();
         let valid = fixture.deck("Documents/MPC Autofill/Decks/Valid.xml");
-        let outside = fixture.0.join("private-image.jpg");
+        let outside = fixture.0.path().join("private-image.jpg");
         std::fs::write(&outside, "untouched private fixture").unwrap();
         for (name, xml) in [
             (
