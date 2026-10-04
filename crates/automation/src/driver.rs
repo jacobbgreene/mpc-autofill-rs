@@ -1185,6 +1185,38 @@ fn is_context_turnover_error(error: &Error) -> bool {
 mod tests {
     use super::*;
 
+    // These latency checks exercise real Chrome processes. Overlapping browser
+    // launches on small CI runners consume the shutdown budget of other tests.
+    // Serialize fixtures, not browsers within a fixture: the ownership test
+    // still keeps its independent browser alive throughout both shutdown paths.
+    fn real_browser_fixture() -> std::sync::MutexGuard<'static, ()> {
+        static FIXTURE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        FIXTURE.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    async fn close_driver_and_wait_for_profile(driver: Driver, profile: &AutomationProfile) {
+        let budget = Duration::from_secs(5);
+        let started = std::time::Instant::now();
+        tokio::time::timeout(budget, async {
+            // Public close includes OwnedBrowser's drop fallback. The profile
+            // remains locked until that fallback has observed its child's exit.
+            driver.close().await;
+            loop {
+                if let Ok(owner) = BrowserProfile::acquire(&profile.0) {
+                    drop(owner);
+                    break;
+                }
+                sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("owned browser exits and releases its profile within five seconds of close");
+        assert!(
+            started.elapsed() <= budget,
+            "full browser close exceeded five seconds"
+        );
+    }
+
     struct StalledBrowser {
         terminated: bool,
         stall_kill: bool,
@@ -1256,6 +1288,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires installed Chrome; drops only a test-owned about:blank browser"]
     async fn cancelled_driver_releases_profile_only_after_child_exit() {
+        let _fixture = real_browser_fixture();
         let profile = AutomationProfile::create().unwrap();
         let chrome = std::env::var("CHROME").ok();
         let driver = Driver::launch_at(chrome.as_deref(), &profile.0, "about:blank".into(), false)
@@ -1284,6 +1317,7 @@ mod tests {
     #[test]
     #[ignore = "requires installed Chrome; tests owned-child cleanup after runtime shutdown"]
     fn browser_cleanup_keeps_working_after_async_runtime_shutdown() {
+        let _fixture = real_browser_fixture();
         let profile = AutomationProfile::create().unwrap();
         let chrome = std::env::var("CHROME").ok();
         let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -1321,6 +1355,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires an installed Chrome; uses only about:blank"]
     async fn browser_shutdown_keeps_an_independent_browser_alive() {
+        let _fixture = real_browser_fixture();
         let independent_profile = AutomationProfile::create().unwrap();
         let owned_profile = AutomationProfile::create().unwrap();
         let chrome = std::env::var("CHROME").ok();
@@ -1332,7 +1367,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let mut owned = Driver::launch_at(
+        let owned = Driver::launch_at(
             chrome.as_deref(),
             &owned_profile.0,
             "about:blank".into(),
@@ -1359,14 +1394,12 @@ mod tests {
         ));
         assert!(owned.page.evaluate("1 + 1").await.is_ok());
         assert!(independent.page.evaluate("1 + 1").await.is_ok());
-        owned.shutdown().await;
-        assert!(owned.browser.get_mut().try_wait().unwrap().is_some());
-        drop(owned);
+        close_driver_and_wait_for_profile(owned, &owned_profile).await;
         assert!(independent.page.evaluate("1 + 1").await.is_ok());
 
         // A stopped event pump makes CDP close fail; the owned child must still exit.
         // Relaunch the same persistent profile through production ownership.
-        let mut stalled = Driver::launch_at(
+        let stalled = Driver::launch_at(
             chrome.as_deref(),
             &owned_profile.0,
             "about:blank".into(),
@@ -1376,9 +1409,17 @@ mod tests {
         .unwrap();
         stalled.handler.0.abort();
         tokio::task::yield_now().await;
-        stalled.shutdown().await;
-        assert!(stalled.browser.get_mut().try_wait().unwrap().is_some());
-        drop(stalled);
+        close_driver_and_wait_for_profile(stalled, &owned_profile).await;
+        let restarted = Driver::launch_at(
+            chrome.as_deref(),
+            &owned_profile.0,
+            "about:blank".into(),
+            false,
+        )
+        .await
+        .unwrap();
+        assert!(restarted.page.evaluate("1 + 1").await.is_ok());
+        close_driver_and_wait_for_profile(restarted, &owned_profile).await;
         assert!(independent.page.evaluate("1 + 1").await.is_ok());
         independent.close().await;
     }
@@ -1386,6 +1427,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires an installed Chrome; closes only a test-owned browser on about:blank"]
     async fn closing_browser_interrupts_stalled_work_and_a_fresh_browser_can_start() {
+        let _fixture = real_browser_fixture();
         let profile = AutomationProfile::create().unwrap();
         let chrome = std::env::var("CHROME").ok();
         for _ in 0..2 {
