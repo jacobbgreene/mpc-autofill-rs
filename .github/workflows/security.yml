@@ -30,9 +30,7 @@ jobs:
         run: npm --prefix frontend audit --audit-level=high
       - name: Install pinned Rust auditor
         run: cargo install cargo-audit --version 0.22.2 --locked
-      - name: Verify vendored GLib backport
-        # Version scanners cannot verify the vendored GLib backport's source.
-        # Check its complete pinned source and exact upstream patch first.
-        run: node scripts/check-glib-backport.mjs
-      - name: Reject Rust vulnerabilities and unsound dependencies
-        run: cargo audit --file Cargo.lock --deny unsound
+      - name: Test the backport integrity gate
+        run: node --test scripts/tests/glib-backport.test.mjs
+      - name: Audit Rust and verified vendored dependencies
+        run: node scripts/audit-rust.mjs

@@ -330,7 +330,10 @@ and builds the Linux package; its version is derived from Cargo.
 GTK3 currently requires the GLib 0.18 Rust binding. The repository vendors that
 binding with the narrow upstream fix for RUSTSEC-2024-0429; it does not replace
 system GLib. `node scripts/check-glib-backport.mjs` verifies every vendored file,
-and Linux CI runs the iterator regression with optimization. Review and remove
+and Linux CI runs the iterator regression with optimization. The audit also
+checks a temporary registry-shaped copy of the lockfile so future GLib
+advisories remain visible; only the integrity-verified fixed advisory is
+excluded from that additional scan. Review and remove
 this backport when Tauri's GTK dependencies support the corrected upstream
 series. Unmaintained transitive dependency notices remain visible in audit logs;
 they are not broad vulnerability exemptions. Windows signing remains a release

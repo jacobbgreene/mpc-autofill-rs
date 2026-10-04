@@ -101,16 +101,16 @@
   $: selectedCard = cards.find((card) => cardKey(card) === selectedKey) ?? null;
 
   // Coalesce event bursts without conflating a front's placement with its back.
-  let pending: { driveId: string; change: Partial<Card>; face?: Face; source?: Card["source"] }[] = [];
+  let pending: { driveId: string; change: Partial<Card>; face?: Face; source?: Card["source"]; sessionId?: number }[] = [];
   let frame: number | null = null;
   function flush() {
     frame = null;
     for (const update of pending)
-      cards = patchCards(cards, update.driveId, update.change, update.face, update.source);
+      if (update.sessionId === summary?.session_id) cards = patchCards(cards, update.driveId, update.change, update.face, update.source);
     pending = [];
   }
-  function patch(driveId: string, change: Partial<Card>, face?: Face, source?: Card["source"]) {
-    pending.push({ driveId, change, face, source });
+  function patch(driveId: string, change: Partial<Card>, face?: Face, source?: Card["source"], sessionId = summary?.session_id) {
+    pending.push({ driveId, change, face, source, sessionId });
     if (frame === null) frame = requestAnimationFrame(flush);
   }
 
@@ -173,7 +173,7 @@
             ),
           ),
           register(
-            listen<{ drive_id: string; source?: Card["source"]; path?: string; error?: string }>(
+            listen<{ drive_id: string; session_id?: number; source?: Card["source"]; path?: string; error?: string }>(
               "thumb-ready",
               ({ payload }) => {
                 patch(payload.drive_id, {
@@ -182,7 +182,7 @@
                     : undefined,
                   thumbStatus: payload.path ? "ready" : "failed",
                   thumbError: payload.error,
-                }, undefined, payload.source);
+                }, undefined, payload.source, payload.session_id);
               },
             ),
           ),
@@ -493,7 +493,7 @@
     artworkCard = null;
     // Reuse the gallery's cached image while the order thumbnails refresh.
     invoke<string>("artwork_thumbnail", { driveId: previewId })
-      .then((path) => patch(previewId, { thumb: convertFileSrc(path) }))
+      .then((path) => patch(previewId, { thumb: convertFileSrc(path) }, undefined, "GoogleDrive"))
       .catch(() => {});
     await tick();
     document
@@ -540,16 +540,17 @@
     patch(card.drive_id, {
       thumbStatus: "failed",
       thumbError: "The preview could not be displayed.",
-    });
+    }, undefined, card.source ?? "GoogleDrive");
   }
 
   async function retryPreview(card: Card) {
+    if (card.source === "LocalFile") return;
     const order = summary;
     patch(card.drive_id, {
       thumb: undefined,
       thumbStatus: "loading",
       thumbError: undefined,
-    });
+    }, undefined, "GoogleDrive");
     try {
       const path = await invoke<string>("artwork_thumbnail", {
         driveId: card.drive_id,
@@ -558,10 +559,10 @@
         patch(card.drive_id, {
           thumb: convertFileSrc(path),
           thumbStatus: "ready",
-        });
+        }, undefined, "GoogleDrive");
     } catch (e) {
       if (summary === order)
-        patch(card.drive_id, { thumbStatus: "failed", thumbError: String(e) });
+        patch(card.drive_id, { thumbStatus: "failed", thumbError: String(e) }, undefined, "GoogleDrive");
     }
   }
 </script>

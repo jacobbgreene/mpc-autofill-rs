@@ -14,11 +14,14 @@ Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 $processCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $AppProcessId)
 $nameCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $Button)
+$typeCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
+$enabledCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::IsEnabledProperty, $true)
+$buttonCondition = [System.Windows.Automation.AndCondition]::new([System.Windows.Automation.Condition[]]@($nameCondition, $typeCondition, $enabledCondition))
 $until = [DateTime]::UtcNow.AddSeconds(8)
 do {
     $windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $processCondition)
     foreach ($window in $windows) {
-        $control = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $nameCondition)
+        $control = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
         if ($null -ne $control) {
             $pattern = $control.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
             [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()

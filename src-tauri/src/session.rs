@@ -81,6 +81,7 @@ pub enum Command {
 
 #[derive(Serialize, Clone)]
 pub struct OrderSummary {
+    pub session_id: u64,
     pub name: String,
     pub quantity: u32,
     pub stock: String,
@@ -123,6 +124,7 @@ struct CardStatusEvent {
 
 #[derive(Serialize, Clone)]
 struct ThumbReadyEvent {
+    session_id: u64,
     drive_id: String,
     source: Source,
     path: Option<String>,
@@ -239,6 +241,7 @@ impl Session {
 }
 
 struct Session {
+    session_id: u64,
     app: AppHandle,
     order: Option<Order>,
     cards_dir: PathBuf,
@@ -263,6 +266,7 @@ impl Drop for Session {
 impl Session {
     fn new(app: AppHandle) -> Self {
         Session {
+            session_id: 0,
             app,
             order: None,
             cards_dir: PathBuf::new(),
@@ -324,6 +328,7 @@ impl Session {
             })
             .collect();
         let summary = OrderSummary {
+            session_id: self.session_id,
             name: order.name.clone(),
             quantity: order.details.quantity,
             stock: order.details.stock.label().to_owned(),
@@ -438,6 +443,7 @@ impl Session {
         }
         self.cards_dir = root;
         self.local_artwork = Some(local);
+        self.session_id = self.session_id.wrapping_add(1);
         self.downloaded.clear();
         Ok(())
     }
@@ -474,12 +480,11 @@ impl Session {
         };
         let new_reference = reviewed.reference;
         if replace && new_reference != reference {
-            let order = self.order.as_mut().expect("order checked above");
-            for card in order.fronts.iter_mut().chain(order.backs.iter_mut()) {
-                if card.source == Source::LocalFile && card.drive_id == reference {
-                    card.drive_id = new_reference.clone();
-                }
-            }
+            self.order = Some(crate::local_artwork::replace_reference(
+                self.order.as_ref().expect("order checked above"),
+                reference,
+                &new_reference,
+            )?);
             self.downloaded.clear();
             self.dirty = true;
         }
@@ -738,7 +743,11 @@ impl Session {
         let app = self.app.clone();
         self.background.retain(|task| !task.inner().is_finished());
         self.background
-            .push(tauri::async_runtime::spawn(fetch_thumbnails(jobs, app)));
+            .push(tauri::async_runtime::spawn(fetch_thumbnails(
+                jobs,
+                app,
+                self.session_id,
+            )));
     }
 
     fn emit_phase(&self, phase: &'static str) {
@@ -895,7 +904,7 @@ struct ThumbJob {
 /// Fetch each card's Drive thumbnail in the backend (which has working TLS),
 /// re-encode it small, cache it to disk, and tell the UI its local path. The UI
 /// then loads it via the asset protocol — no webview networking involved.
-async fn fetch_thumbnails(jobs: Vec<ThumbJob>, app: AppHandle) {
+async fn fetch_thumbnails(jobs: Vec<ThumbJob>, app: AppHandle, session_id: u64) {
     let client = download::build_client();
     let client_ref = &client;
 
@@ -928,6 +937,7 @@ async fn fetch_thumbnails(jobs: Vec<ThumbJob>, app: AppHandle) {
         let _ = app.emit(
             "thumb-ready",
             ThumbReadyEvent {
+                session_id,
                 drive_id,
                 source,
                 path: error.is_none().then(|| path.to_string_lossy().into_owned()),

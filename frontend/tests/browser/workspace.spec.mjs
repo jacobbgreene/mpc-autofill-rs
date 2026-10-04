@@ -184,7 +184,7 @@ async function launch(page) {
           if (window.__test.thumbFailure) throw new Error("Image offline");
           return "test.jpg";
         }
-        if (command === "artwork_dpi") return {};
+        if (command === "artwork_dpi") return window.__test.dpiValues ?? {};
         if (command === "edit_decklist" && window.__test.order) {
           window.__test.order = {
             ...window.__test.order,
@@ -206,10 +206,12 @@ async function launch(page) {
         if (command === "get_decklist")
           return window.__test.decklist ?? "1 Island";
         if (command === "thumbnails") {
+          if (window.__test.manualThumbnails) return;
           for (const card of window.__test.order?.cards ?? []) {
             if (card.source === "LocalFile" && !card.local_approved) continue;
             await window.__test.emit("thumb-ready", {
               drive_id: card.drive_id,
+              session_id: window.__test.order.session_id,
               source: card.source ?? "GoogleDrive",
               path: window.__test.thumbFailure ? null : "test.jpg",
               error: window.__test.thumbFailure ? "Image offline" : null,
@@ -323,7 +325,7 @@ test("local images stay blocked after cancelled consent and become ready only af
   await page.getByRole("button", { name: /Needs attention\s*1/ }).click();
   const localCard = page.getByRole("button", { name: /Preview Local card.png/ });
   await expect(localCard).toBeVisible();
-  await expect(localCard.getByRole("img")).toHaveCount(0);
+  await expect(localCard.locator("img")).toHaveCount(0);
   expect(await page.evaluate(() => window.__test.calls.filter(call => /approve_local|replace_local|^fill$/.test(call.command)))).toEqual([]);
 
   await page.getByRole("button", { name: "Review local images", exact: true }).click();
@@ -381,6 +383,100 @@ test("local replacement sends only the existing entry ID and waits for explicit 
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.locator(".order-save-state")).toHaveText(/Saved.*local-deck.xml/);
   expect(await page.evaluate(() => window.__test.persistedOrder.cards[0].drive_id)).toBe("C:/fixtures/replacement.png");
+  expect(errors).toEqual([]);
+});
+
+test("DPI requests exclude local filenames and keep local and remote copies of one ID separate", async ({ page }) => {
+  const errors = await launch(page);
+  await page.evaluate(() => {
+    window.__test.path = "C:/fixtures/dpi-boundaries.xml";
+    window.__test.dpiValues = { sharedDriveId: 1200, remoteBack: 600 };
+    window.__test.order = {
+      name: "dpi-boundaries", quantity: 3, stock: "S30", foil: false,
+      path: window.__test.path, dirty: false, session_id: 2,
+      cards: [
+        { face: "front", drive_id: "privateImage123", name: "Private image.png", slots: [0], cardback: false, source: "LocalFile", local_approved: false },
+        { face: "front", drive_id: "sharedDriveId", name: "Local twin.png", slots: [1], cardback: false, source: "LocalFile", local_approved: false },
+        { face: "front", drive_id: "sharedDriveId", name: "Remote twin.png", slots: [2], cardback: false, source: "GoogleDrive" },
+        { face: "back", drive_id: "remoteBack", name: "Remote back.png", slots: [0, 1, 2], cardback: true, source: "GoogleDrive" },
+      ],
+    };
+  });
+  await page.getByRole("button", { name: "Open order", exact: true }).click();
+  const privateImage = page.getByRole("button", { name: /Preview Private image.png/ });
+  const localTwin = page.getByRole("button", { name: /Preview Local twin.png/ });
+  const remoteTwin = page.getByRole("button", { name: /Preview Remote twin.png/ });
+  await expect(remoteTwin.getByText("1200 DPI", { exact: true })).toBeVisible();
+  await expect(localTwin.getByText("DPI unavailable", { exact: true })).toBeVisible();
+  await expect(privateImage.getByText("DPI unavailable", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => window.__test.calls.filter(call => call.command === "artwork_dpi"))).toEqual([
+    { command: "artwork_dpi", args: { driveIds: ["sharedDriveId", "remoteBack"] } },
+  ]);
+  await expect(remoteTwin.locator("img")).toHaveCount(1);
+  await expect(localTwin.locator("img")).toHaveCount(0);
+  await expect(privateImage.locator("img")).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test("thumbnail events from an old session cannot cross a queued order replacement", async ({ page }) => {
+  const errors = await launch(page);
+  await page.evaluate(() => {
+    window.__test.path = "C:/fixtures/epoch-one.xml";
+    window.__test.manualThumbnails = true;
+    window.__test.order = {
+      name: "Epoch one", quantity: 1, stock: "S30", foil: false,
+      path: window.__test.path, dirty: false, session_id: 1,
+      cards: [{ face: "front", drive_id: "same-image", name: "Epoch card.png", slots: [0], cardback: false, source: "GoogleDrive" }],
+    };
+  });
+  await page.getByRole("button", { name: "Open order", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Epoch one", exact: true })).toBeVisible();
+  await page.evaluate(async () => {
+    // Hold the actual event batching callbacks so an old update remains queued
+    // while the next load completes, without timing sleeps or mocked app logic.
+    const frames = new Map();
+    let nextFrame = 100000;
+    const originalFrame = window.requestAnimationFrame;
+    const originalCancel = window.cancelAnimationFrame;
+    window.requestAnimationFrame = callback => {
+      const id = ++nextFrame;
+      frames.set(id, callback);
+      return id;
+    };
+    window.cancelAnimationFrame = id => { frames.delete(id); originalCancel(id); };
+    window.__test.flushHeldFrames = () => {
+      const callbacks = [...frames.values()];
+      frames.clear();
+      callbacks.forEach(callback => callback(performance.now()));
+    };
+    window.__test.restoreFrames = () => {
+      window.requestAnimationFrame = originalFrame;
+      window.cancelAnimationFrame = originalCancel;
+    };
+    await window.__test.emit("thumb-ready", { drive_id: "same-image", source: "GoogleDrive", session_id: 1, path: "old-before-load.jpg" });
+    window.__test.oldFrameWasQueued = frames.size > 0;
+    window.__test.path = "C:/fixtures/epoch-two.xml";
+    window.__test.order = { ...structuredClone(window.__test.order), name: "Epoch two", path: window.__test.path, session_id: 2 };
+    document.querySelector(".more-actions").open = true;
+    [...document.querySelectorAll(".more-actions button")].find(button => button.textContent.trim() === "Open order").click();
+  });
+  await expect(page.getByRole("heading", { name: "Epoch two", exact: true })).toBeVisible();
+  await page.evaluate(async () => {
+    await window.__test.emit("thumb-ready", { drive_id: "same-image", source: "GoogleDrive", session_id: 1, path: "old-after-load.jpg" });
+    window.__test.flushHeldFrames();
+    window.__test.restoreFrames();
+  });
+  expect(await page.evaluate(() => window.__test.oldFrameWasQueued)).toBe(true);
+  const card = page.getByRole("button", { name: /Preview Epoch card.png/ });
+  await expect(card.locator("img")).toHaveCount(0);
+  await page.evaluate(() => window.__test.emit("thumb-ready", { drive_id: "same-image", source: "GoogleDrive", session_id: 2, path: "current.jpg" }));
+  await expect(card.locator("img")).toHaveCount(1);
+  await page.evaluate(async () => {
+    await window.__test.emit("thumb-ready", { drive_id: "same-image", source: "GoogleDrive", session_id: 1, path: null, error: "Stale preview failure" });
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
+  await expect(card.locator("img")).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Retry preview for Epoch card", exact: true })).toHaveCount(0);
   expect(errors).toEqual([]);
 });
 

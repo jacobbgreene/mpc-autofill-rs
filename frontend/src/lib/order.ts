@@ -27,6 +27,7 @@ export type Card = {
 };
 
 export type OrderSummary = {
+  session_id?: number;
   name: string;
   quantity: number;
   stock: string;

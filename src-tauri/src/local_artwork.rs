@@ -17,6 +17,31 @@ pub struct LocalArtwork {
     grants: HashMap<String, PathBuf>,
 }
 
+/// Choosing a file already used by this deck merges its placements, so the UI
+/// and uploader still have one entry per source and image on each face.
+pub fn replace_reference(order: &Order, old: &str, new: &str) -> Result<Order, String> {
+    let mut edited = order.clone();
+    for face in [&mut edited.fronts, &mut edited.backs] {
+        let mut merged: Vec<autofill_core::Card> = Vec::new();
+        for mut card in face.drain(..) {
+            if card.source == Source::LocalFile && card.drive_id == old {
+                card.drive_id = new.to_owned();
+            }
+            if let Some(existing) = merged
+                .iter_mut()
+                .find(|other| other.source == card.source && other.drive_id == card.drive_id)
+            {
+                existing.slots.extend(card.slots);
+            } else {
+                merged.push(card);
+            }
+        }
+        *face = merged;
+    }
+    edited.validate().map_err(|e| e.to_string())?;
+    Ok(edited)
+}
+
 impl LocalArtwork {
     pub fn new(cache: &Path, order_path: &Path) -> Result<Self, String> {
         let root = cache.join("local-sessions");
@@ -160,6 +185,22 @@ mod tests {
             8, 2, 0, 0, 0, 144, 119, 83, 222, 0, 0, 0, 12, 73, 68, 65, 84, 120, 156, 99, 96, 96,
             96, 0, 0, 0, 4, 0, 1, 246, 23, 56, 85, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
         ]
+    }
+
+    #[test]
+    fn replacing_with_an_existing_local_image_merges_only_matching_sources() {
+        let order = Order::from_xml("local", r#"<order><details><quantity>3</quantity><stock>(S30) Standard Smooth</stock><foil>false</foil></details><fronts><card><id>old</id><sourceType>Local File</sourceType><slots>0</slots></card><card><id>chosen</id><sourceType>Local File</sourceType><slots>1</slots></card><card><id>chosen</id><slots>2</slots></card></fronts><cardback>back</cardback></order>"#).unwrap();
+        let edited = replace_reference(&order, "old", "chosen").unwrap();
+        assert_eq!(edited.fronts.len(), 2);
+        assert_eq!(edited.fronts[0].slots, [0, 1].into_iter().collect());
+        assert_eq!(edited.fronts[0].source, Source::LocalFile);
+        assert_eq!(edited.fronts[1].source, Source::GoogleDrive);
+        assert_eq!(edited.fronts[1].slots, [2].into_iter().collect());
+        assert_eq!(order.fronts[0].drive_id, "old");
+        assert_eq!(
+            Order::from_xml("local", &edited.to_xml().unwrap()).unwrap(),
+            edited
+        );
     }
 
     #[test]

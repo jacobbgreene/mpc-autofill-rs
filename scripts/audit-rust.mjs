@@ -19,19 +19,19 @@ mkdirSync(reportDirectory, { recursive: true });
 const database = join(reportDirectory, 'advisory-db');
 const tempRoot = resolve(tmpdir());
 const temporary = mkdtempSync(join(tempRoot, 'mpc-vendor-audit-'));
-const advisory = 'RUSTSEC-2024-0429';
-const provenance = JSON.parse(readFileSync(join(root, 'vendor', 'glib', 'UPSTREAM-INTEGRITY.json'), 'utf8'));
-const lock = readFileSync(join(root, 'Cargo.lock'), 'utf8');
-const sections = lock.split('[[package]]');
-const index = sections.findIndex((section) => /^name = "glib"$/m.test(section));
-assert.ok(index > 0);
-sections[index] = sections[index].replace(/^version = "0\.18\.5"$/m,
-  `version = "0.18.5"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\nchecksum = "${provenance.archive_sha256}"`);
-const shadow = join(temporary, 'Cargo.lock');
-writeFileSync(shadow, sections.join('[[package]]'));
-
 let failed = false;
 try {
+  const advisory = 'RUSTSEC-2024-0429';
+  const provenance = JSON.parse(readFileSync(join(root, 'vendor', 'glib', 'UPSTREAM-INTEGRITY.json'), 'utf8'));
+  const lock = readFileSync(join(root, 'Cargo.lock'), 'utf8');
+  const sections = lock.split('[[package]]');
+  const index = sections.findIndex((section) => /^name = "glib"$/m.test(section));
+  assert.ok(index > 0);
+  sections[index] = sections[index].replace(/^version = "0\.18\.5"$/m,
+    `version = "0.18.5"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\nchecksum = "${provenance.archive_sha256}"`);
+  const shadow = join(temporary, 'Cargo.lock');
+  writeFileSync(shadow, sections.join('[[package]]'));
+
   for (const [label, file, ignored] of [
     ['actual', join(root, 'Cargo.lock'), []],
     ['vendor-upstream', shadow, [advisory]],

@@ -34,7 +34,13 @@ async function scenario(name, exercise) {
       try { browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 1000 }); break; } catch { await wait(250); }
     }
     assert(browser, 'Installed WebView2 did not expose its test endpoint');
-    const page = browser.contexts()[0].pages()[0];
+    let page;
+    for (let i = 0; i < 40; i++) {
+      page = browser.contexts().flatMap(context => context.pages()).find(page => /tauri|localhost/.test(page.url()));
+      if (page) break;
+      await wait(250);
+    }
+    assert(page, 'Installed app did not create its WebView page');
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await expect(page.getByRole('button', { name: 'Paste a decklist', exact: true })).toBeEnabled({ timeout: 15000 });
