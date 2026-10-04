@@ -1451,9 +1451,19 @@ mod tests {
                     _ = driver.wait_until_closed() => {},
                     _ = std::future::pending::<()>() => panic!("stalled work unexpectedly finished"),
                 }
-            }).await.expect("browser close command and stalled-work interruption should finish within five seconds");
-            assert!(driver.is_closed());
-            driver.close().await;
+                assert!(driver.is_closed());
+                driver.close().await;
+                // Connection closure can precede child exit. Allow the owned
+                // drop fallback to finish before restarting this same profile,
+                // within the original command-to-cleanup five-second budget.
+                loop {
+                    if let Ok(owner) = BrowserProfile::acquire(&profile.0) {
+                        drop(owner);
+                        break;
+                    }
+                    sleep(Duration::from_millis(20)).await;
+                }
+            }).await.expect("browser close, stalled-work interruption and profile release should finish within five seconds");
         }
     }
 
