@@ -507,8 +507,12 @@
     if (frame !== null) cancelAnimationFrame(frame);
     frame = null;
     pending = [];
+    const sessionChanged = edited.session_id !== summary?.session_id;
     const thumbnails = new Map(
-      cards.map((card) => [cardKey(card), card.thumb]),
+      cards
+        // A new approval may replace the bytes at an unchanged local path.
+        .filter((card) => !sessionChanged || card.source !== "LocalFile")
+        .map((card) => [cardKey(card), card.thumb]),
     );
     summary = edited;
     cards = edited.cards.map((card) => ({

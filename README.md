@@ -278,14 +278,16 @@ what gets uploaded. References stay in the XML, and replacements still require
 Generated artwork is cached in the app cache, never in a `cards/` folder beside
 an imported order. Cache filenames use source-specific hashes, and the webview
 can access only preview files explicitly granted by the backend. Local artwork
-must be an ordinary file: network shares, device paths, alternate data streams,
-and symbolic links/junctions are rejected. Choose a regular copy if needed.
+must be an ordinary file: UNC paths, device paths, alternate data streams,
+and symbolic links/junctions are rejected. Mapped drives and mounted filesystems
+use the same ordinary-file checks and still require explicit approval.
 
 Import limits are enforced before constructing the deck: 612 cards, 8 MiB XML,
 1 MB text lists, and bounded XML depth, records and fields. Artwork downloads are
 limited to 64 MiB per original and 8 MiB per thumbnail, with a 64 megapixel and
-256 MiB decoder allocation limit. Processing is serialized across downloads to
-bound aggregate memory. An invalid or interrupted image is never treated as a
+256 MiB decoded-image buffer limit. One image is decoded at a time; decoder
+working memory is additional to these buffer limits. An invalid or interrupted
+image is never treated as a
 completed cache entry; incomplete downloads block autofill and can be retried.
 
 Keyboard shortcuts:

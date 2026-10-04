@@ -438,14 +438,20 @@ impl Session {
             .join("images-v2");
         autofill_core::cache::private_directory(&root)?;
         let local = LocalArtwork::new(&root, order_path)?;
+        self.cards_dir = root;
+        self.local_artwork = Some(local);
+        self.invalidate_previews();
+        self.downloaded.clear();
+        Ok(())
+    }
+
+    fn invalidate_previews(&mut self) {
         for task in self.background.drain(..) {
             task.abort();
         }
-        self.cards_dir = root;
-        self.local_artwork = Some(local);
+        // Events already queued by the webview must also be rejected, including
+        // when a replacement refreshes a local snapshot at the same path.
         self.session_id = self.session_id.wrapping_add(1);
-        self.downloaded.clear();
-        Ok(())
     }
 
     async fn review_local_image(
@@ -485,9 +491,10 @@ impl Session {
                 reference,
                 &new_reference,
             )?);
-            self.downloaded.clear();
             self.dirty = true;
         }
+        self.invalidate_previews();
+        self.downloaded.clear();
         self.summary()
     }
 
@@ -744,7 +751,8 @@ impl Session {
                         .local_artwork
                         .as_ref()
                         .expect("snapshot has a session")
-                        .thumbnail_path(&card.drive_id),
+                        .thumbnail_path(&card.drive_id)
+                        .expect("snapshot has an immutable thumbnail path"),
                 });
             }
         }

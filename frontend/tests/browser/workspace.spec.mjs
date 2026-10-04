@@ -35,7 +35,9 @@ async function launch(page) {
         return id;
       },
       unregisterCallback: (key) => callbacks.delete(key),
-      convertFileSrc: () => png,
+      convertFileSrc: (path) => window.__test.labelThumbnailSources
+        ? `${png}#${encodeURIComponent(path)}`
+        : png,
       invoke: async (command, args = {}) => {
         window.__test.calls.push({ command, args });
         if (command === "plugin:event|listen") {
@@ -383,6 +385,67 @@ test("local replacement sends only the existing entry ID and waits for explicit 
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.locator(".order-save-state")).toHaveText(/Saved.*local-deck.xml/);
   expect(await page.evaluate(() => window.__test.persistedOrder.cards[0].drive_id)).toBe("C:/fixtures/replacement.png");
+  expect(errors).toEqual([]);
+});
+
+test("same-path local replacement clears old previews while cancellation preserves them", async ({ page }) => {
+  const errors = await launch(page);
+  await page.evaluate(() => {
+    window.__test.path = "C:/fixtures/local-replacement.xml";
+    window.__test.manualThumbnails = true;
+    window.__test.labelThumbnailSources = true;
+    window.__test.order = {
+      name: "local-replacement", quantity: 2, stock: "S30", foil: false,
+      path: window.__test.path, dirty: false, session_id: 1,
+      cards: [
+        { face: "front", drive_id: "art/original.png", name: "Local card.png", slots: [0], cardback: false, source: "LocalFile", local_approved: true },
+        { face: "front", drive_id: "remote-card", name: "Remote card.png", slots: [1], cardback: false, source: "GoogleDrive" },
+      ],
+    };
+  });
+  await page.getByRole("button", { name: "Open order", exact: true }).click();
+  await page.evaluate(async () => {
+    await window.__test.emit("thumb-ready", { drive_id: "art/original.png", source: "LocalFile", session_id: 1, path: "snapshot-one.jpg" });
+    await window.__test.emit("thumb-ready", { drive_id: "remote-card", source: "GoogleDrive", session_id: 1, path: "remote-preview.jpg" });
+  });
+  const localImage = page.getByRole("button", { name: /Preview Local card.png/ }).locator("img");
+  const remoteImage = page.getByRole("button", { name: /Preview Remote card.png/ }).locator("img");
+  await expect(localImage).toHaveAttribute("src", /#snapshot-one\.jpg$/);
+  await expect(remoteImage).toHaveAttribute("src", /#remote-preview\.jpg$/);
+
+  // A cancelled native picker returns the unchanged summary and epoch.
+  await page.getByRole("button", { name: "Review local images", exact: true }).click();
+  const review = page.getByRole("dialog", { name: "Review local images" });
+  await review.getByRole("button", { name: "Choose replacement…", exact: true }).click();
+  await review.getByRole("button", { name: "Done", exact: true }).click();
+  await expect(localImage).toHaveAttribute("src", /#snapshot-one\.jpg$/);
+  await expect(remoteImage).toHaveAttribute("src", /#remote-preview\.jpg$/);
+
+  // Successful consent can approve changed bytes at the exact same file path.
+  await page.evaluate(() => {
+    window.__test.localReviewResult = {
+      ...structuredClone(window.__test.order), session_id: 2,
+    };
+  });
+  await page.getByRole("button", { name: "Review local images", exact: true }).click();
+  await review.getByRole("button", { name: "Choose replacement…", exact: true }).click();
+  await review.getByRole("button", { name: "Done", exact: true }).click();
+  await expect(localImage).toHaveCount(0);
+  await expect(remoteImage).toHaveAttribute("src", /#remote-preview\.jpg$/);
+
+  await page.evaluate(async () => {
+    await window.__test.emit("thumb-ready", { drive_id: "art/original.png", source: "LocalFile", session_id: 1, path: "snapshot-one.jpg" });
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
+  await expect(localImage).toHaveCount(0);
+  await page.evaluate(() => window.__test.emit("thumb-ready", { drive_id: "art/original.png", source: "LocalFile", session_id: 2, path: "snapshot-two.jpg" }));
+  await expect(localImage).toHaveAttribute("src", /#snapshot-two\.jpg$/);
+  await page.evaluate(async () => {
+    await window.__test.emit("thumb-ready", { drive_id: "art/original.png", source: "LocalFile", session_id: 1, path: null, error: "Old snapshot failed" });
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
+  await expect(localImage).toHaveAttribute("src", /#snapshot-two\.jpg$/);
+  await expect(remoteImage).toHaveAttribute("src", /#remote-preview\.jpg$/);
   expect(errors).toEqual([]);
 });
 

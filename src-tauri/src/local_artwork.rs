@@ -15,6 +15,7 @@ pub struct LocalArtwork {
     directory: tempfile::TempDir,
     base: PathBuf,
     grants: HashMap<String, PathBuf>,
+    next_generation: u64,
 }
 
 /// Choosing a file already used by this deck merges its placements, so the UI
@@ -54,6 +55,7 @@ impl LocalArtwork {
             directory,
             base: order_path.parent().unwrap_or(Path::new("")).to_path_buf(),
             grants: HashMap::new(),
+            next_generation: 0,
         })
     }
 
@@ -61,11 +63,11 @@ impl LocalArtwork {
         self.grants.get(reference)
     }
 
-    pub fn thumbnail_path(&self, reference: &str) -> PathBuf {
-        self.directory.path().join(format!(
-            "{}.jpg",
-            autofill_core::cache::image_key("local", reference, "thumbnail-640-v2")
-        ))
+    pub fn thumbnail_path(&self, reference: &str) -> Option<PathBuf> {
+        // A new approval may pick the same source path with different contents.
+        // Bind its preview to the immutable snapshot, never just the XML name.
+        self.get(reference)
+            .map(|snapshot| snapshot.with_extension("preview.jpg"))
     }
 
     // This only manipulates path strings. It must never probe the original.
@@ -140,10 +142,14 @@ impl LocalArtwork {
     }
 
     async fn approve(&mut self, reference: &str, source: &Path) -> Result<PathBuf, String> {
+        let generation = self.next_generation;
+        self.next_generation = generation
+            .checked_add(1)
+            .ok_or("local image approval generation exhausted")?;
         let dest = self.directory.path().join(autofill_core::cache::image_key(
             "local",
             reference,
-            "approved-original-v1",
+            &format!("approved-original-v2-{generation}"),
         ));
         let path = autofill_core::local_files::snapshot_approved(source, &dest).await?;
         self.grants.insert(reference.to_owned(), path.clone());
@@ -192,6 +198,100 @@ mod tests {
             8, 2, 0, 0, 0, 144, 119, 83, 222, 0, 0, 0, 12, 73, 68, 65, 84, 120, 156, 99, 96, 96,
             96, 0, 0, 0, 4, 0, 1, 246, 23, 56, 85, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
         ]
+    }
+
+    fn white_png() -> &'static [u8] {
+        &[
+            137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1,
+            8, 2, 0, 0, 0, 144, 119, 83, 222, 0, 0, 0, 12, 73, 68, 65, 84, 120, 156, 99, 248, 255,
+            255, 63, 0, 5, 254, 2, 254, 13, 239, 70, 184, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96,
+            130,
+        ]
+    }
+
+    async fn refreshed_approval_preserves_old_snapshot_and_refreshes_preview(
+        replace_existing: bool,
+    ) {
+        let cache = tempfile::tempdir().unwrap();
+        let original = cache.path().join("original.png");
+        let reference = original.to_str().unwrap();
+        let mut session = LocalArtwork::new(cache.path(), &cache.path().join("order.xml")).unwrap();
+        let deck = if replace_existing {
+            order(&["other.png", reference])
+        } else {
+            order(&[reference])
+        };
+        std::fs::write(&original, png()).unwrap();
+        session
+            .review(&deck, reference, false, |path| async { Ok(Some(path)) })
+            .await
+            .unwrap()
+            .unwrap();
+        let old_snapshot = session.get(reference).unwrap().clone();
+        let old_preview = session.thumbnail_path(reference).unwrap();
+        autofill_core::local_files::snapshot_thumbnail(&old_snapshot, &old_preview, 640)
+            .await
+            .unwrap();
+        let old_preview_bytes = std::fs::read(&old_preview).unwrap();
+
+        std::fs::write(&original, white_png()).unwrap();
+        let replaced = if replace_existing {
+            "other.png"
+        } else {
+            reference
+        };
+        let reviewed = session
+            .review(&deck, replaced, true, |_| async {
+                Ok(Some(original.clone()))
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(reviewed.reference, reference);
+        let snapshot = session.get(reference).unwrap().clone();
+        let preview = session.thumbnail_path(reference).unwrap();
+        assert_ne!(snapshot, old_snapshot);
+        assert_ne!(preview, old_preview);
+        assert_eq!(std::fs::read(&old_snapshot).unwrap(), png());
+        assert_eq!(std::fs::read(&snapshot).unwrap(), white_png());
+        autofill_core::local_files::snapshot_thumbnail(&snapshot, &preview, 640)
+            .await
+            .unwrap();
+        let preview_bytes = std::fs::read(&preview).unwrap();
+        assert_ne!(preview_bytes, old_preview_bytes);
+        assert_eq!(
+            preview_bytes,
+            autofill_core::image_proc::thumbnail_from_original(white_png(), 640).unwrap()
+        );
+        assert_eq!(std::fs::read(&old_preview).unwrap(), old_preview_bytes);
+        let edited = replace_reference(&deck, replaced, &reviewed.reference).unwrap();
+        assert_eq!(edited.fronts.len(), 1);
+        assert_eq!(
+            session.approved_paths(&edited).unwrap()[&(Source::LocalFile, reference.into())],
+            snapshot
+        );
+
+        // A failed later selection keeps both the last valid grant and preview.
+        std::fs::write(&original, b"invalid replacement").unwrap();
+        assert!(session
+            .review(&edited, reference, true, |_| async {
+                Ok(Some(original.clone()))
+            })
+            .await
+            .is_err());
+        assert_eq!(session.get(reference), Some(&snapshot));
+        assert_eq!(session.thumbnail_path(reference), Some(preview));
+        assert_eq!(std::fs::read(&snapshot).unwrap(), white_png());
+    }
+
+    #[tokio::test]
+    async fn selecting_the_same_source_again_uses_a_new_snapshot_and_preview() {
+        refreshed_approval_preserves_old_snapshot_and_refreshes_preview(false).await;
+    }
+
+    #[tokio::test]
+    async fn replacing_with_an_existing_source_refreshes_its_snapshot_and_preview() {
+        refreshed_approval_preserves_old_snapshot_and_refreshes_preview(true).await;
     }
 
     #[test]
