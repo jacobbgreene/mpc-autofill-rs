@@ -19,9 +19,11 @@
   export let applying = false;
   export let applyError = "";
   export let description = "";
+  export let editableEntry = false;
   const dispatch = createEventDispatcher<{
     close: void;
     choose: ArtworkChoice;
+    edit: void;
   }>();
   let dialog: HTMLDialogElement;
   let body: HTMLDivElement;
@@ -51,6 +53,7 @@
   });
   onDestroy(() => {
     generation++;
+    dialog?.close();
   });
   async function load(nextPage: number, nextQuery = query, append = false) {
     if (applying || (append && busy)) return;
@@ -59,7 +62,9 @@
     loadingMore = append;
     error = "";
     requested = { page: nextPage, query: nextQuery, append };
-    if (kind === "cardback" && !append) {
+    if (!append) {
+      page = nextPage;
+      pageInput = nextPage + 1;
       results = null;
       choices = [];
       failedPreviews = new Set();
@@ -102,7 +107,8 @@
       page = nextPage;
       pageInput = page + 1;
     } catch (e) {
-      if (token === generation) error = String(e);
+      if (token === generation)
+        error = `Search failed for “${nextQuery || "all card backs"}”: ${String(e)}`;
     } finally {
       if (token === generation) {
         busy = false;
@@ -137,16 +143,6 @@
   }
 </script>
 
-<svelte:window
-  on:keydown={(event) => {
-    if (event.key === "Escape" && dialog?.open) {
-      event.preventDefault();
-      event.stopPropagation();
-      close();
-    }
-  }}
-/>
-
 <dialog
   bind:this={dialog}
   class="editor-dialog artwork-gallery"
@@ -169,26 +165,45 @@
       on:click={close}><Icon name="close" /></button
     >
   </header>
+  <label class="gallery-search-label" for="gallery-search"
+    >{kind === "cardback"
+      ? "Search card backs"
+      : "Search replacement artwork"}</label
+  >
   <form
     class="gallery-toolbar"
     on:submit|preventDefault={() => load(0, inputQuery.trim())}
   >
     <label class="search-field"
       ><Icon name="search" size={16} /><input
+        id="gallery-search"
         bind:value={inputQuery}
         disabled={applying}
-        aria-label="Artwork search name"
+        aria-label={kind === "cardback"
+          ? "Search card backs"
+          : "Search replacement artwork"}
         placeholder={kind === "cardback"
           ? "Search card backs"
-          : "Search by card name"}
+          : "Search replacement artwork"}
       /></label
     >
     <button
       class="button secondary small"
-      disabled={locked || (kind === "card" && !inputQuery.trim())}
+      disabled={applying || (kind === "card" && !inputQuery.trim())}
       >Search</button
     >
   </form>
+  <div class="gallery-context">
+    {#if kind === "card"}<p class="editor-help gallery-search-context">
+        Choosing artwork for <strong>{title}</strong>. Selecting an image
+        changes its artwork; edit the decklist to change its name.
+      </p>{/if}
+    {#if editableEntry}<button
+        class="text-button"
+        disabled={applying}
+        on:click={() => dispatch("edit")}>Edit entry</button
+      >{/if}
+  </div>
   <div class="editor-body" bind:this={body} aria-busy={busy || applying}>
     {#if applying}<p class="gallery-status" role="status">
         Updating artwork…
@@ -300,7 +315,7 @@
     {:else}
       <button
         class="button secondary small"
-        disabled={locked || page === 0}
+        disabled={locked || !results || page === 0}
         on:click={() => load(page - 1)}
         ><Icon name="chevron-left" size={16} />Previous</button
       >

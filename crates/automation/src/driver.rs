@@ -49,11 +49,100 @@ pub struct Driver {
     site: &'static Site,
     // Held so the browser connection and its event pump stay alive for the
     // driver's lifetime; `close` (or drop) tears both down.
-    browser: Browser,
-    handler: JoinHandle<()>,
+    browser: tokio::sync::Mutex<Browser>,
+    handler: AbortTask,
+    dialogs: AbortTask,
+}
+
+// A JoinHandle alone detaches its task on drop, including failed/cancelled launch.
+struct AbortTask(JoinHandle<()>);
+impl Drop for AbortTask {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+#[cfg(test)]
+struct AutomationProfile(std::path::PathBuf);
+#[cfg(test)]
+impl AutomationProfile {
+    fn create() -> std::io::Result<Self> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        loop {
+            let path = std::env::temp_dir().join(format!(
+                "mpc-autofill-browser-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            match std::fs::create_dir(&path) {
+                Ok(()) => return Ok(Self(path)),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error),
+            }
+        }
+    }
+}
+#[cfg(test)]
+impl Drop for AutomationProfile {
+    fn drop(&mut self) {
+        if let Err(error) = std::fs::remove_dir_all(&self.0) {
+            tracing::warn!(%error, path = %self.0.display(), "could not remove automation profile");
+        }
+    }
+}
+
+trait BrowserShutdown {
+    async fn graceful_close(&mut self) -> std::result::Result<(), String>;
+    async fn force_close(&mut self) -> std::result::Result<(), String>;
+}
+impl BrowserShutdown for Browser {
+    async fn graceful_close(&mut self) -> std::result::Result<(), String> {
+        self.close().await.map_err(|error| error.to_string())?;
+        self.wait().await.map_err(|error| error.to_string())?;
+        Ok(())
+    }
+    async fn force_close(&mut self) -> std::result::Result<(), String> {
+        self.kill()
+            .await
+            .transpose()
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+}
+async fn close_browser(browser: &mut impl BrowserShutdown) {
+    match tokio::time::timeout(Duration::from_millis(2500), browser.graceful_close()).await {
+        Ok(Ok(())) => return,
+        Ok(Err(error)) => tracing::warn!(%error, "browser close failed; terminating its child"),
+        Err(_) => tracing::warn!("browser close timed out; terminating its child"),
+    }
+    match tokio::time::timeout(Duration::from_millis(400), browser.force_close()).await {
+        Ok(Err(error)) => tracing::warn!(%error, "could not terminate automation browser"),
+        Err(_) => tracing::warn!("browser termination timed out; using kill-on-drop"),
+        _ => {}
+    }
 }
 
 impl Driver {
+    pub fn is_closed(&self) -> bool {
+        // chromiumoxide's stream can remain pending after a clean websocket
+        // close. Check only the child we launched, never other browser processes.
+        self.handler.0.is_finished()
+            || self
+                .browser
+                .try_lock()
+                .ok()
+                .and_then(|mut browser| browser.try_wait().ok().flatten())
+                .is_some()
+    }
+
+    /// Closing the automation window interrupts even a stalled site operation.
+    pub async fn wait_until_closed(&self) {
+        while !self.is_closed() {
+            sleep(POLL).await;
+        }
+    }
+
     /// Launch a visible Chrome and open the target site's starting page.
     pub async fn launch(chrome_path: Option<&str>) -> Result<Driver> {
         let site = &site::MAKE_PLAYING_CARDS;
@@ -75,27 +164,39 @@ impl Driver {
         let (browser, mut handler) = Browser::launch(config)
             .await
             .map_err(|error| Error::stage("startup/browser-launch", error.into()))?;
-        let handler_task = tokio::spawn(async move { while handler.next().await.is_some() {} });
+        let handler_task = AbortTask(tokio::spawn(async move {
+            while let Some(event) = handler.next().await {
+                if matches!(event, Err(CdpError::Ws(_) | CdpError::Io(_))) {
+                    break;
+                }
+            }
+        }));
         let page = browser
             .new_page(site.starting_url())
             .await
             .map_err(|error| Error::stage("startup/new-page", error.into()))?;
-        auto_accept_dialogs(&page)
+        let dialogs = auto_accept_dialogs(&page)
             .await
             .map_err(|error| Error::stage("startup/dialog-listener", error))?;
 
         Ok(Driver {
             page,
             site,
-            browser,
+            browser: tokio::sync::Mutex::new(browser),
             handler: handler_task,
+            dialogs,
         })
     }
 
     /// Close the browser and stop its event pump. Kills the child Chrome process.
     pub async fn close(mut self) {
-        let _ = self.browser.close().await;
-        self.handler.abort();
+        // Keep the event pump running until CDP close completes. The actor also
+        // bounds the total shutdown time; dropping Browser kills its owned child.
+        if self.browser.get_mut().try_wait().ok().flatten().is_none() {
+            close_browser(self.browser.get_mut()).await;
+        }
+        self.dialogs.0.abort();
+        self.handler.0.abort();
     }
 
     // region authentication
@@ -980,6 +1081,131 @@ fn is_context_turnover_error(error: &Error) -> bool {
 mod tests {
     use super::*;
 
+    struct StalledBrowser {
+        terminated: bool,
+        stall_kill: bool,
+    }
+    impl BrowserShutdown for StalledBrowser {
+        async fn graceful_close(&mut self) -> std::result::Result<(), String> {
+            std::future::pending().await
+        }
+        async fn force_close(&mut self) -> std::result::Result<(), String> {
+            self.terminated = true;
+            if self.stall_kill {
+                std::future::pending().await
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stalled_browser_close_terminates_the_owned_browser_before_actor_deadline() {
+        let mut browser = StalledBrowser {
+            terminated: false,
+            stall_kill: false,
+        };
+        let start = Instant::now();
+        close_browser(&mut browser).await;
+        assert!(browser.terminated);
+        assert_eq!(start.elapsed(), Duration::from_millis(2500));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stalled_browser_kill_is_bounded_for_kill_on_drop_fallback() {
+        let mut browser = StalledBrowser {
+            terminated: false,
+            stall_kill: true,
+        };
+        let start = Instant::now();
+        close_browser(&mut browser).await;
+        assert!(browser.terminated);
+        assert_eq!(start.elapsed(), Duration::from_millis(2900));
+    }
+
+    #[test]
+    fn automation_profiles_are_owned_and_never_shared() {
+        let first = AutomationProfile::create().unwrap();
+        let second = AutomationProfile::create().unwrap();
+        let path = first.0.clone();
+        assert_ne!(path, second.0);
+        drop(first);
+        assert!(!path.exists());
+        assert!(second.0.exists());
+    }
+
+    #[tokio::test]
+    #[ignore = "requires an installed Chrome; uses only about:blank"]
+    async fn browser_shutdown_keeps_an_independent_browser_alive() {
+        async fn launch_test_browser() -> (Browser, AbortTask, AutomationProfile) {
+            let profile = AutomationProfile::create().unwrap();
+            let mut config = BrowserConfig::builder().user_data_dir(&profile.0);
+            if let Ok(chrome) = std::env::var("CHROME") {
+                config = config.chrome_executable(chrome);
+            }
+            let (browser, mut handler) = Browser::launch(config.build().unwrap()).await.unwrap();
+            let task = AbortTask(tokio::spawn(async move {
+                while handler.next().await.is_some() {}
+            }));
+            (browser, task, profile)
+        }
+        let (mut independent, _independent_task, _independent_profile) =
+            launch_test_browser().await;
+        let (mut owned, _owned_task, _owned_profile) = launch_test_browser().await;
+        close_browser(&mut owned).await;
+        assert!(owned.try_wait().unwrap().is_some());
+        assert!(independent.version().await.is_ok());
+
+        // A stopped event pump makes CDP close fail; the owned child must still exit.
+        let (mut stalled, stalled_task, _stalled_profile) = launch_test_browser().await;
+        drop(stalled_task);
+        tokio::task::yield_now().await;
+        close_browser(&mut stalled).await;
+        assert!(stalled.try_wait().unwrap().is_some());
+        assert!(independent.version().await.is_ok());
+        close_browser(&mut independent).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires an installed Chrome; closes only a test-owned browser on about:blank"]
+    async fn closing_browser_interrupts_stalled_work_and_a_fresh_browser_can_start() {
+        for _ in 0..2 {
+            let profile = AutomationProfile::create().unwrap();
+            let mut config = BrowserConfig::builder().user_data_dir(&profile.0);
+            if let Ok(chrome) = std::env::var("CHROME") {
+                config = config.chrome_executable(chrome);
+            }
+            let (browser, mut handler) = Browser::launch(config.build().unwrap()).await.unwrap();
+            let task = AbortTask(tokio::spawn(async move {
+                while handler.next().await.is_some() {}
+            }));
+            let page = browser.new_page("about:blank").await.unwrap();
+            let closer = page.clone();
+            let driver = Driver {
+                page,
+                browser: tokio::sync::Mutex::new(browser),
+                handler: task,
+                site: &site::MAKE_PLAYING_CARDS,
+                dialogs: AbortTask(tokio::spawn(std::future::pending())),
+            };
+            assert!(!driver.is_closed());
+            let close = AbortTask(tokio::spawn(async move {
+                let _ = closer
+                    .execute(chromiumoxide::cdp::browser_protocol::browser::CloseParams::default())
+                    .await;
+            }));
+            tokio::time::timeout(Duration::from_secs(5), async {
+                tokio::select! {
+                    _ = driver.wait_until_closed() => {},
+                    _ = std::future::pending::<()>() => panic!("stalled work unexpectedly finished"),
+                }
+            }).await.expect("browser close should interrupt stalled work");
+            assert!(driver.is_closed());
+            driver.close().await;
+            drop(close);
+        }
+    }
+
     #[test]
     fn same_mode_requires_both_common_back_and_single_slot_layout() {
         assert_eq!(select_back_mode(true, true), ImageMode::Same);
@@ -1229,7 +1455,10 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert_eq!(error.to_string(), "front-text/wait-ready: Request timed out.");
+        assert_eq!(
+            error.to_string(),
+            "front-text/wait-ready: Request timed out."
+        );
     }
 
     #[tokio::test]
@@ -1666,8 +1895,7 @@ async fn reap_orphaned_automation_browsers() {
             // whole command line into argv[0], and Chrome's child processes
             // inherit the flags, so this catches the entire tree of any
             // browser on the automation profile.
-            if contains_subslice(&cmdline, &needle) && contains_subslice(&cmdline, debugger_flag)
-            {
+            if contains_subslice(&cmdline, &needle) && contains_subslice(&cmdline, debugger_flag) {
                 pids.push(pid);
             }
         }
@@ -1702,24 +1930,26 @@ async fn reap_orphaned_automation_browsers() {}
 fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
     !needle.is_empty()
         && haystack.len() >= needle.len()
-        && haystack.windows(needle.len()).any(|window| window == needle)
+        && haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
 }
 
 /// Auto-accept any `alert`/`confirm`/`beforeunload` dialog the editor raises;
 /// an unhandled dialog blocks the page's JS and hangs `evaluate`.
-async fn auto_accept_dialogs(page: &Page) -> Result<()> {
+async fn auto_accept_dialogs(page: &Page) -> Result<AbortTask> {
     let mut dialogs = page
         .event_listener::<EventJavascriptDialogOpening>()
         .await?;
     // The accept loop runs concurrently with the driver's own use of the page, so
     // it needs its own handle; a chromiumoxide `Page` clone is a cheap refcount.
     let page = page.clone();
-    tokio::spawn(async move {
+    let task = tokio::spawn(async move {
         while dialogs.next().await.is_some() {
             if let Ok(params) = HandleJavaScriptDialogParams::builder().accept(true).build() {
                 let _ = page.execute(params).await;
             }
         }
     });
-    Ok(())
+    Ok(AbortTask(task))
 }

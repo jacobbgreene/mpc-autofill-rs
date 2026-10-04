@@ -49,6 +49,7 @@ pub enum Command {
     EditDecklist {
         text: String,
         selections: Vec<ArtworkSelection>,
+        options: NewOrderOptions,
         reply: Reply<OrderSummary>,
     },
     ChangeArtwork {
@@ -65,9 +66,6 @@ pub enum Command {
     },
     Fill {
         reply: Reply<()>,
-    },
-    Shutdown {
-        reply: oneshot::Sender<()>,
     },
 }
 
@@ -91,6 +89,7 @@ pub struct CardView {
     pub query: Option<String>,
     /// True for the order's common cardback, so the UI can set it apart.
     pub cardback: bool,
+    pub source: Source,
 }
 
 // Event payloads. `Clone` is required by Tauri's `Emitter::emit`; all are tiny.
@@ -112,7 +111,8 @@ struct CardStatusEvent {
 #[derive(Serialize, Clone)]
 struct ThumbReadyEvent {
     drive_id: String,
-    path: String,
+    path: Option<String>,
+    error: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -120,16 +120,42 @@ struct PhaseEvent {
     phase: &'static str,
 }
 
-/// Run the actor until every command sender has been dropped.
-pub async fn run(mut inbox: mpsc::Receiver<Command>, app: AppHandle) {
+/// Shutdown is separate from the inbox and can interrupt long network work.
+pub async fn run(
+    mut inbox: mpsc::Receiver<Command>,
+    app: AppHandle,
+    shutdown: crate::shutdown::Shutdown,
+) {
     let mut session = Session::new(app);
-    while let Some(command) = inbox.recv().await {
+    loop {
+        let command = tokio::select! {
+            biased;
+            _ = shutdown.cancelled() => break,
+            command = inbox.recv() => match command { Some(command) => command, None => break },
+        };
+        // Do not cancel a save halfway through its atomic replacement.
+        if matches!(&command, Command::SaveOrder { .. }) {
+            session.handle(command).await;
+        } else {
+            tokio::select! {
+                biased;
+                _ = shutdown.cancelled() => break,
+                _ = session.handle(command) => {},
+            }
+        }
+    }
+    inbox.close();
+    session.shutdown().await;
+}
+
+impl Session {
+    async fn handle(&mut self, command: Command) {
         match command {
             Command::LoadOrder { path, reply } => {
-                let _ = reply.send(session.load_order(path).await);
+                let _ = reply.send(self.load_order(path).await);
             }
             Command::LoadThumbnails { reply } => {
-                session.spawn_thumbnail_fetch();
+                self.spawn_thumbnail_fetch();
                 let _ = reply.send(Ok(()));
             }
             Command::CreateOrder {
@@ -138,12 +164,11 @@ pub async fn run(mut inbox: mpsc::Receiver<Command>, app: AppHandle) {
                 selections,
                 reply,
             } => {
-                let _ = reply.send(session.create_order(&options, &text, &selections));
+                let _ = reply.send(self.create_order(&options, &text, &selections));
             }
             Command::GetDecklist { reply } => {
                 let _ = reply.send(
-                    session
-                        .order
+                    self.order
                         .as_ref()
                         .ok_or_else(|| "no order loaded".to_owned())
                         .and_then(|order| order.to_decklist().map_err(|e| e.to_string())),
@@ -155,8 +180,7 @@ pub async fn run(mut inbox: mpsc::Receiver<Command>, app: AppHandle) {
                 reply,
             } => {
                 let _ = reply.send(
-                    session
-                        .order
+                    self.order
                         .as_ref()
                         .ok_or_else(|| "no order loaded".to_owned())
                         .and_then(|order| {
@@ -169,30 +193,26 @@ pub async fn run(mut inbox: mpsc::Receiver<Command>, app: AppHandle) {
             Command::EditDecklist {
                 text,
                 selections,
+                options,
                 reply,
             } => {
-                let _ = reply.send(session.edit_decklist(&text, &selections));
+                let _ = reply.send(self.edit_decklist(&text, &selections, &options));
             }
             Command::ChangeArtwork {
                 drive_id,
                 selection,
                 reply,
             } => {
-                let _ = reply.send(session.change_artwork(&drive_id, &selection));
+                let _ = reply.send(self.change_artwork(&drive_id, &selection));
             }
             Command::SaveOrder { path, reply } => {
-                let _ = reply.send(session.save_order(path).await);
+                let _ = reply.send(self.save_order(path).await);
             }
             Command::Download { reply } => {
-                let _ = reply.send(session.download().await);
+                let _ = reply.send(self.download().await);
             }
             Command::Fill { reply } => {
-                let _ = reply.send(session.fill().await);
-            }
-            Command::Shutdown { reply } => {
-                session.shutdown().await;
-                let _ = reply.send(());
-                break;
+                let _ = reply.send(self.fill().await);
             }
         }
     }
@@ -208,6 +228,15 @@ struct Session {
     post: Option<PostProcess>,
     order_path: PathBuf,
     dirty: bool,
+    background: Vec<tauri::async_runtime::JoinHandle<()>>,
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        for task in &self.background {
+            task.abort();
+        }
+    }
 }
 
 impl Session {
@@ -221,6 +250,7 @@ impl Session {
             post: Some(PostProcess::default()),
             order_path: PathBuf::new(),
             dirty: false,
+            background: Vec::new(),
         }
     }
 
@@ -272,6 +302,7 @@ impl Session {
                 query: card.query.clone(),
                 slots: card.slots.iter().copied().collect(),
                 cardback: face == Face::Back && cardback_id == Some(card.drive_id.as_str()),
+                source: card.source,
             })
             .collect();
         let summary = OrderSummary {
@@ -325,12 +356,14 @@ impl Session {
         &mut self,
         text: &str,
         selections: &[ArtworkSelection],
+        options: &NewOrderOptions,
     ) -> Result<OrderSummary, String> {
-        let edited = self
-            .order
-            .as_ref()
-            .ok_or("no order loaded")?
-            .edit_decklist(text, selections)
+        let edited = options
+            .revise(
+                self.order.as_ref().ok_or("no order loaded")?,
+                text,
+                selections,
+            )
             .map_err(|e| e.to_string())?;
         self.dirty |= self.order.as_ref() != Some(&edited);
         self.order = Some(edited);
@@ -444,7 +477,14 @@ impl Session {
         self.emit_phase("downloading");
         self.download().await?;
 
+        if self.driver.as_ref().is_some_and(Driver::is_closed) {
+            if let Some(driver) = self.driver.take() {
+                driver.close().await;
+            }
+        }
+
         if self.driver.is_none() {
+            self.emit_phase("starting-browser");
             let chrome = std::env::var("CHROME").ok();
             let driver = Driver::launch(chrome.as_deref())
                 .await
@@ -452,8 +492,21 @@ impl Session {
             self.driver = Some(driver);
         }
 
-        // Immutable borrows for the rest of the fill; nothing here mutates `self`.
         let driver = self.driver.as_ref().expect("driver launched above");
+        let result = tokio::select! {
+            biased;
+            _ = driver.wait_until_closed() => Err("browser/closed: The automation browser was closed. Your deck is unchanged.".into()),
+            result = self.fill_in_browser(driver) => result,
+        };
+        if self.driver.as_ref().is_some_and(Driver::is_closed) {
+            if let Some(driver) = self.driver.take() {
+                driver.close().await;
+            }
+        }
+        result
+    }
+
+    async fn fill_in_browser(&self, driver: &Driver) -> Result<(), String> {
         let order = self.order.as_ref().expect("order checked above");
 
         if !driver
@@ -529,6 +582,9 @@ impl Session {
     }
 
     async fn shutdown(&mut self) {
+        for task in self.background.drain(..) {
+            task.abort();
+        }
         if let Some(driver) = self.driver.take() {
             driver.close().await;
         }
@@ -536,7 +592,7 @@ impl Session {
 
     /// Kick off backend thumbnail fetching in a detached task so it never blocks
     /// the actor (the user can start a fill while previews are still loading).
-    fn spawn_thumbnail_fetch(&self) {
+    fn spawn_thumbnail_fetch(&mut self) {
         let Some(order) = self.order.as_ref() else {
             return;
         };
@@ -560,7 +616,9 @@ impl Session {
             .collect();
 
         let app = self.app.clone();
-        tauri::async_runtime::spawn(fetch_thumbnails(jobs, app));
+        self.background.retain(|task| !task.inner().is_finished());
+        self.background
+            .push(tauri::async_runtime::spawn(fetch_thumbnails(jobs, app)));
     }
 
     fn emit_phase(&self, phase: &'static str) {
@@ -720,22 +778,24 @@ async fn fetch_thumbnails(jobs: Vec<ThumbJob>, app: AppHandle) {
 
     let mut results = stream::iter(jobs)
         .map(|job| async move {
-            let ok = download::fetch_thumbnail(client_ref, &job.url, &job.path, THUMBNAIL_EDGE)
-                .await
-                .is_ok();
-            (job.drive_id, if ok { Some(job.path) } else { None })
+            let result =
+                download::fetch_thumbnail(client_ref, &job.url, &job.path, THUMBNAIL_EDGE).await;
+            (
+                job.drive_id,
+                job.path,
+                result.err().map(|error| error.to_string()),
+            )
         })
         .buffer_unordered(THUMBNAIL_CONCURRENCY);
 
-    while let Some((drive_id, path)) = results.next().await {
-        if let Some(path) = path {
-            let _ = app.emit(
-                "thumb-ready",
-                ThumbReadyEvent {
-                    drive_id,
-                    path: path.to_string_lossy().into_owned(),
-                },
-            );
-        }
+    while let Some((drive_id, path, error)) = results.next().await {
+        let _ = app.emit(
+            "thumb-ready",
+            ThumbReadyEvent {
+                drive_id,
+                path: error.is_none().then(|| path.to_string_lossy().into_owned()),
+                error,
+            },
+        );
     }
 }

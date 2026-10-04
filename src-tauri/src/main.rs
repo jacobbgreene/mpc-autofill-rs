@@ -9,9 +9,10 @@ mod artwork_thumbnail;
 mod files;
 mod saved_decks;
 mod session;
+mod shutdown;
 
 use std::path::PathBuf;
-use std::time::Duration;
+use std::sync::Mutex;
 
 use autofill_core::decklist::{ArtworkSelection, DecklistPreview};
 use autofill_core::new_order::NewOrderOptions;
@@ -22,6 +23,8 @@ use tokio::sync::{mpsc, oneshot};
 /// The only state the frontend touches: a handle to the session actor's inbox.
 struct AppState {
     inbox: mpsc::Sender<Command>,
+    shutdown: shutdown::Shutdown,
+    task: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl AppState {
@@ -32,11 +35,15 @@ impl AppState {
         build: impl FnOnce(oneshot::Sender<Result<T, String>>) -> Command,
     ) -> Result<T, String> {
         let (reply, response) = oneshot::channel();
-        self.inbox
-            .send(build(reply))
+        self.shutdown
+            .run(async {
+                self.inbox
+                    .send(build(reply))
+                    .await
+                    .map_err(|_| "session is not running")?;
+                response.await.map_err(|_| "session dropped the request")?
+            })
             .await
-            .map_err(|_| "session is not running")?;
-        response.await.map_err(|_| "session dropped the request")?
     }
 }
 
@@ -92,11 +99,13 @@ async fn edit_decklist(
     state: State<'_, AppState>,
     text: String,
     selections: Vec<ArtworkSelection>,
+    options: NewOrderOptions,
 ) -> Result<OrderSummary, String> {
     state
         .request(|reply| Command::EditDecklist {
             text,
             selections,
+            options,
             reply,
         })
         .await
@@ -181,12 +190,6 @@ async fn create_order(
         .await
 }
 
-/// Longest the exit path waits for the actor to close the browser. The actor
-/// handles commands sequentially, so a mid-fill or mid-download Shutdown can
-/// only be serviced after the current command returns; without a bound, a
-/// stuck operation would make the window un-closable.
-const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
-
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -204,33 +207,65 @@ fn main() {
             // The actor needs an owned handle to emit events; this is the one
             // framework handle we hand off, moved (not shared) into its task.
             let handle = app.handle().clone();
-            tauri::async_runtime::spawn(session::run(receiver, handle));
-            app.manage(AppState { inbox });
+            let shutdown = shutdown::Shutdown::default();
+            let task = tauri::async_runtime::handle().inner().spawn(session::run(
+                receiver,
+                handle,
+                shutdown.clone(),
+            ));
+            app.manage(shutdown.clone());
+            app.manage(AppState {
+                inbox,
+                shutdown,
+                task: Mutex::new(Some(task)),
+            });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load_order, thumbnails, download, fill, get_decklist, preview_decklist, edit_decklist, change_artwork, save_order, read_decklist, preview_new_decklist, create_order, artwork::search_artwork, artwork::artwork_dpi, artwork_thumbnail::artwork_thumbnail, saved_decks::list_saved_decks, saved_decks::default_deck_path])
+        .invoke_handler(tauri::generate_handler![
+            load_order,
+            thumbnails,
+            download,
+            fill,
+            get_decklist,
+            preview_decklist,
+            edit_decklist,
+            change_artwork,
+            save_order,
+            read_decklist,
+            preview_new_decklist,
+            create_order,
+            artwork::search_artwork,
+            artwork::artwork_dpi,
+            artwork_thumbnail::artwork_thumbnail,
+            saved_decks::list_saved_decks,
+            saved_decks::default_deck_path
+        ])
         .build(tauri::generate_context!())
         .expect("failed to start MPC Autofill")
         .run(|app, event| {
-            // On exit, ask the actor to close the browser so we don't orphan the
-            // visible Chrome window. Block briefly until it has torn down.
-            if let tauri::RunEvent::ExitRequested { .. } = event {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
                 if let Some(state) = app.try_state::<AppState>() {
-                    let (reply, response) = oneshot::channel();
-                    if state.inbox.blocking_send(Command::Shutdown { reply }).is_ok() {
-                        // Wait briefly for a clean browser teardown, then exit
-                        // regardless — a hung command must not pin the window
-                        // open. In that pathological case the live Chrome is
-                        // orphaned; the next launch reaps it (see Driver::launch).
-                        let expired = tauri::async_runtime::block_on(async {
-                            tokio::time::timeout(SHUTDOWN_GRACE, response).await.is_err()
-                        });
-                        if expired {
-                            tracing::warn!(
-                                "session did not shut down within {SHUTDOWN_GRACE:?}; exiting anyway"
-                            );
-                        }
+                    if state.shutdown.finished() {
+                        return;
                     }
+                    api.prevent_exit();
+                    if !state.shutdown.begin() {
+                        return;
+                    }
+                    let task = state
+                        .task
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner())
+                        .take();
+                    let shutdown = state.shutdown.clone();
+                    let app = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Some(task) = task {
+                            shutdown::finish_session(task).await;
+                        }
+                        shutdown.finish();
+                        app.exit(0);
+                    });
                 }
             }
         });

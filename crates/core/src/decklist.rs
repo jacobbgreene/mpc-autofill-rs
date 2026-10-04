@@ -18,13 +18,32 @@ pub struct ArtworkSelection {
 pub struct MissingArtwork {
     pub query: String,
     pub face: String,
+    pub source_lines: Vec<usize>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RetainedArtwork {
+    #[serde(flatten)]
+    pub entry: MissingArtwork,
+    pub card: Card,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DecklistIssue {
+    pub code: &'static str,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<usize>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct DecklistPreview {
     pub quantity: u32,
     pub unresolved: Vec<MissingArtwork>,
+    pub retained: Vec<RetainedArtwork>,
+    pub common_back: Option<Card>,
     pub needs_common_back: bool,
+    pub issues: Vec<DecklistIssue>,
 }
 
 struct Entry {
@@ -77,6 +96,7 @@ fn resolve(
     face: Face,
     selections: &[ArtworkSelection],
     unresolved: &mut Vec<MissingArtwork>,
+    line: usize,
 ) -> Result<Option<Card>> {
     let face = if face == Face::Front { "front" } else { "back" };
     if let Some(selection) = selections
@@ -105,9 +125,10 @@ fn resolve(
     match matches.as_slice() {
         [card] => Ok(Some((*card).clone())),
         [] => {
-            let missing = MissingArtwork { query: query.into(), face: face.into() };
-            if !unresolved.iter().any(|item| item.face == missing.face && item.query.eq_ignore_ascii_case(&missing.query)) {
-                unresolved.push(missing);
+            if let Some(item) = unresolved.iter_mut().find(|item| item.face == face && item.query.eq_ignore_ascii_case(query)) {
+                item.source_lines.push(line);
+            } else {
+                unresolved.push(MissingArtwork { query: query.into(), face: face.into(), source_lines: vec![line] });
             }
             Ok(None)
         }
@@ -184,6 +205,14 @@ fn parse_line(line: &str, number: usize) -> Result<(u32, &str, Option<&str>)> {
 impl Order {
     pub fn to_decklist(&self) -> Result<String> {
         let unique_label = |card: &Card, face: &[Card]| {
+            // An artwork replacement must not rename the next text draft.
+            // Keep the submitted name when it still identifies this image.
+            if let Some(query) = card.query.as_deref() {
+                let matches = candidates(face, query);
+                if matches.len() == 1 && matches[0].drive_id == card.drive_id {
+                    return query.to_owned();
+                }
+            }
             let name = label(card);
             if candidates(face, &name).len() == 1 {
                 name
@@ -252,8 +281,16 @@ impl Order {
         let mut preview = DecklistPreview {
             quantity: 0,
             unresolved: Vec::new(),
+            retained: Vec::new(),
+            common_back: None,
             needs_common_back: false,
+            issues: Vec::new(),
         };
+        if text.len() > 1_000_000 {
+            return Err(Error::Invalid(
+                "decklist is too large; use text under 1 MB".into(),
+            ));
+        }
         for (index, line) in text.lines().enumerate() {
             let line = line.trim().trim_start_matches('\u{feff}');
             if line.is_empty()
@@ -263,28 +300,76 @@ impl Order {
             {
                 continue;
             }
-            let (quantity, name, back_name) = parse_line(line, index + 1)?;
+            let (quantity, name, back_name) = match parse_line(line, index + 1) {
+                Ok(parsed) => parsed,
+                Err(error) => {
+                    preview.issues.push(DecklistIssue {
+                        code: "invalid_line",
+                        message: error.to_string(),
+                        line: Some(index + 1),
+                    });
+                    continue;
+                }
+            };
             preview.quantity += quantity;
-            if preview.quantity > PROJECT_MAX_SIZE {
-                return Err(Error::Invalid(format!(
-                    "decklist exceeds {PROJECT_MAX_SIZE} cards"
-                )));
+            if preview.quantity > PROJECT_MAX_SIZE
+                && !preview
+                    .issues
+                    .iter()
+                    .any(|issue| issue.code == "too_many_cards")
+            {
+                preview.issues.push(DecklistIssue {
+                    code: "too_many_cards",
+                    message: format!("decklist exceeds {PROJECT_MAX_SIZE} cards"),
+                    line: Some(index + 1),
+                });
             }
-            let front = resolve(
-                &self.fronts,
+            // Resolve each face independently so one invalid face does not hide
+            // diagnostics or artwork on the rest of the list.
+            let mut resolve_face = |name, face| match resolve(
+                if face == Face::Front {
+                    &self.fronts
+                } else {
+                    &self.backs
+                },
                 name,
-                Face::Front,
+                face,
                 selections,
                 &mut preview.unresolved,
-            )?;
+                index + 1,
+            ) {
+                Ok(card) => {
+                    if let Some(card) = &card {
+                        let face = if face == Face::Front { "front" } else { "back" };
+                        if let Some(item) = preview.retained.iter_mut().find(|item| {
+                            item.entry.face == face && item.entry.query.eq_ignore_ascii_case(name)
+                        }) {
+                            item.entry.source_lines.push(index + 1);
+                        } else {
+                            preview.retained.push(RetainedArtwork {
+                                entry: MissingArtwork {
+                                    query: name.into(),
+                                    face: face.into(),
+                                    source_lines: vec![index + 1],
+                                },
+                                card: card.clone(),
+                            });
+                        }
+                    }
+                    card
+                }
+                Err(error) => {
+                    preview.issues.push(DecklistIssue {
+                        code: "invalid_artwork",
+                        message: error.to_string(),
+                        line: Some(index + 1),
+                    });
+                    None
+                }
+            };
+            let front = resolve_face(name, Face::Front);
             let back = if let Some(name) = back_name {
-                resolve(
-                    &self.backs,
-                    name,
-                    Face::Back,
-                    selections,
-                    &mut preview.unresolved,
-                )?
+                resolve_face(name, Face::Back)
             } else if let Some(front) = &front {
                 let associated: Vec<_> = self
                     .backs
@@ -295,15 +380,25 @@ impl Order {
                     [back] => Some((*back).clone()),
                     [] => self.common_back(),
                     _ => {
-                        return Err(Error::Invalid(format!(
-                        "'{name}' uses different backs. Specify each as '1 {name} | Back name'."
-                    )))
+                        preview.issues.push(DecklistIssue {
+                            code: "ambiguous_back",
+                            message: format!("'{name}' uses different backs. Specify each as '1 {name} | Back name'."),
+                            line: Some(index + 1),
+                        });
+                        None
                     }
                 }
             } else {
                 self.common_back()
             };
             preview.needs_common_back |= back_name.is_none() && back.is_none();
+            if back_name.is_none() {
+                if let Some(back) = &back {
+                    if Some(&back.drive_id) == self.cardback_id.as_ref() {
+                        preview.common_back = Some(back.clone());
+                    }
+                }
+            }
             entries.push(Entry {
                 quantity,
                 front,
@@ -311,7 +406,11 @@ impl Order {
             });
         }
         if entries.is_empty() {
-            return Err(Error::Invalid("decklist has no cards".into()));
+            preview.issues.push(DecklistIssue {
+                code: "empty_deck",
+                message: "decklist has no cards".into(),
+                line: None,
+            });
         }
         Ok((entries, preview))
     }
@@ -344,9 +443,17 @@ impl Order {
 
     pub fn edit_decklist(&self, text: &str, selections: &[ArtworkSelection]) -> Result<Order> {
         let (entries, preview) = self.plan_decklist(text, selections)?;
+        if let Some(issue) = preview.issues.first() {
+            return Err(Error::Invalid(issue.message.clone()));
+        }
         if !preview.unresolved.is_empty() {
             return Err(Error::Invalid(
                 "choose artwork for every new card before applying the decklist".into(),
+            ));
+        }
+        if preview.needs_common_back {
+            return Err(Error::Invalid(
+                "choose a common cardback or specify a reverse for every card".into(),
             ));
         }
         let mut order = self.clone();
@@ -382,6 +489,44 @@ mod tests {
     const XML: &str = r#"<order><details><quantity>3</quantity><stock>(S30) Standard Smooth</stock><foil>false</foil></details><fronts><card><id>a</id><name>Island (Art A).png</name><query>Island</query><slots>0,2</slots></card><card><id>b</id><name>Delver.png</name><slots>1</slots></card></fronts><backs><card><id>special</id><name>Insect.png</name><slots>1</slots></card></backs><cardback>common</cardback></order>"#;
     fn order() -> Order {
         Order::from_xml("Deck", XML).unwrap()
+    }
+
+    #[test]
+    fn preview_includes_retained_artwork_with_exact_lines_and_custom_backs() {
+        let original = order();
+        let preview = original
+            .preview_decklist(
+                "\u{feff}# comment\r\n2 Island\r\n0 Bad\r\n1 Delver | Insect\r\n1 island",
+                &[],
+            )
+            .unwrap();
+        assert_eq!(preview.retained.len(), 3);
+        assert_eq!(preview.retained[0].entry.source_lines, [2, 5]);
+        assert_eq!(preview.retained[0].card.drive_id, "a");
+        assert_eq!(preview.retained[2].entry.face, "back");
+        assert_eq!(preview.retained[2].entry.source_lines, [4]);
+        assert_eq!(preview.common_back.unwrap().drive_id, "common");
+        assert!(preview.unresolved.is_empty());
+        assert_eq!(preview.issues[0].line, Some(3));
+        assert_eq!(original, order());
+    }
+
+    #[test]
+    fn replacement_artwork_keeps_the_submitted_name_when_reopening_text() {
+        let edited = order()
+            .edit_decklist(
+                "2 Island",
+                &[ArtworkSelection {
+                    query: "Island".into(),
+                    face: "front".into(),
+                    drive_id: "replacement".into(),
+                    name: "Mountain.png".into(),
+                }],
+            )
+            .unwrap();
+        assert_eq!(edited.to_decklist().unwrap(), "2 Island");
+        let reopened = Order::from_xml("Saved", &edited.to_xml().unwrap()).unwrap();
+        assert_eq!(reopened.to_decklist().unwrap(), "2 Island");
     }
 
     #[test]
@@ -506,6 +651,51 @@ mod tests {
             .unwrap();
         assert_eq!(preview.quantity, 2);
         assert_eq!(preview.unresolved.len(), 1);
+        assert_eq!(preview.unresolved[0].source_lines, vec![1, 2]);
+    }
+    #[test]
+    fn preview_collects_line_errors_and_keeps_valid_faces_and_source_lines() {
+        let text = "\u{feff}# imported\r\nCREATURES (4)\r\n2 New Front | New Back\r\n0 Bad Quantity\r\n1 | Missing\r\n1 new front\r\n// end";
+        let preview = order().preview_decklist(text, &[]).unwrap();
+        assert_eq!(preview.quantity, 3);
+        assert_eq!(
+            preview
+                .issues
+                .iter()
+                .map(|issue| issue.line)
+                .collect::<Vec<_>>(),
+            vec![Some(4), Some(5)]
+        );
+        assert_eq!(preview.unresolved.len(), 2);
+        assert_eq!(preview.unresolved[0].source_lines, vec![3, 6]);
+        assert_eq!(preview.unresolved[1].source_lines, vec![3]);
+        assert_eq!(preview.unresolved[1].face, "back");
+        assert!(order().edit_decklist(text, &[]).is_err());
+    }
+    #[test]
+    fn partial_previews_cannot_bypass_deck_limit_or_invalid_text() {
+        let original = order();
+        let preview = original
+            .preview_decklist("612 Island\n1 Delver\n0 Bad", &[])
+            .unwrap();
+        assert_eq!(preview.quantity, 613);
+        assert!(preview
+            .issues
+            .iter()
+            .any(|issue| issue.code == "too_many_cards"));
+        assert!(original.edit_decklist("612 Island\n1 Delver", &[]).is_err());
+        assert!(original.edit_decklist("1 Island\n0 Bad", &[]).is_err());
+        assert_eq!(original, order());
+        assert!(original
+            .preview_decklist("612 Island", &[])
+            .unwrap()
+            .issues
+            .is_empty());
+    }
+    #[test]
+    fn non_ascii_names_are_not_conflated() {
+        let preview = order().preview_decklist("1 Æther\n1 æther", &[]).unwrap();
+        assert_eq!(preview.unresolved.len(), 2);
     }
     #[test]
     fn multiple_backs_for_one_front_round_trip_with_explicit_names() {

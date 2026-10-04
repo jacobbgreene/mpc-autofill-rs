@@ -113,6 +113,20 @@ test("failed searches can be retried and pages and card backs use separate cache
   client.dispose();
 });
 
+test("explicit retry refreshes a cached no-match without discarding other pages", async () => {
+  let calls = 0;
+  const client = createArtworkSearch(async () => {
+    calls++;
+    return result;
+  });
+  await client.search("Typo", 0);
+  await client.search("Island", 0);
+  await client.search("Typo", 0, "card", "interactive", true);
+  await client.search("Island", 0);
+  assert.equal(calls, 3);
+  client.dispose();
+});
+
 test("closing or replacing a draft cancels queued searches without starting them", async () => {
   let finish;
   let started = 0;

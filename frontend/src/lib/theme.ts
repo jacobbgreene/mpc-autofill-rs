@@ -1,21 +1,19 @@
-export type Theme = "system" | "light" | "dark";
+export type Theme = "light" | "dark" | "zero";
 const storageKey = "mpc-autofill-theme";
 
 export function readTheme(): Theme {
   try {
     const value = localStorage.getItem(storageKey);
-    if (value === "light" || value === "dark") return value;
+    if (value === "light" || value === "dark" || value === "zero") return value;
   } catch {
     /* Appearance still works when storage is unavailable. */
   }
-  return "system";
+  // Unset, legacy System, and invalid preferences use the explicit default.
+  return "light";
 }
 
 export function applyTheme(theme: Theme) {
-  const dark =
-    theme === "dark" ||
-    (theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
-  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  document.documentElement.dataset.theme = theme;
 }
 
 export function saveTheme(theme: Theme) {

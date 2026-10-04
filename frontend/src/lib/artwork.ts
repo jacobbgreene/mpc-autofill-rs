@@ -42,6 +42,7 @@ export type ArtworkSearch = (
   page: number,
   kind?: ArtworkKind,
   priority?: "interactive" | "background",
+  refresh?: boolean,
 ) => Promise<ArtworkResults>;
 export type ArtworkChoice = {
   art: Artwork;
@@ -82,10 +83,12 @@ export function createArtworkSearch(load: ArtworkSearch, concurrency = 4) {
     page,
     kind = "card",
     priority = "interactive",
+    refresh = false,
   ) => {
     if (disposed) return Promise.reject(new Error("Artwork search closed"));
     query = query.trim();
     const key = JSON.stringify([query, page, kind]);
+    if (refresh) cache.delete(key);
     const existing = cache.get(key);
     if (existing) return existing;
     const request = new Promise<ArtworkResults>((resolve, reject) => {
@@ -119,7 +122,9 @@ export function createArtworkSearch(load: ArtworkSearch, concurrency = 4) {
     });
     cache.set(key, request);
     // Failed pages must be retryable.
-    void request.catch(() => cache.delete(key));
+    void request.catch(() => {
+      if (cache.get(key) === request) cache.delete(key);
+    });
     pump();
     return request;
   };
