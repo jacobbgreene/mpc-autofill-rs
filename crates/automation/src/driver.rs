@@ -1435,22 +1435,25 @@ mod tests {
                 Driver::launch_at(chrome.as_deref(), &profile.0, "about:blank".into(), false)
                     .await
                     .unwrap();
-            let closer = driver.page.clone();
             assert!(!driver.is_closed());
-            let close = AbortTask(tokio::spawn(async move {
-                let _ = closer
-                    .execute(chromiumoxide::cdp::browser_protocol::browser::CloseParams::default())
-                    .await;
-            }));
             tokio::time::timeout(Duration::from_secs(5), async {
+                // Browser.Close belongs to the root CDP connection, not the
+                // Page's target session. Release the mutex after the response
+                // so the observer can poll the owned child independently.
+                {
+                    let browser = driver.browser.lock().await;
+                    browser
+                        .execute(chromiumoxide::cdp::browser_protocol::browser::CloseParams::default())
+                        .await
+                        .expect("browser-scope close command should succeed");
+                }
                 tokio::select! {
                     _ = driver.wait_until_closed() => {},
                     _ = std::future::pending::<()>() => panic!("stalled work unexpectedly finished"),
                 }
-            }).await.expect("browser close should interrupt stalled work");
+            }).await.expect("browser close command and stalled-work interruption should finish within five seconds");
             assert!(driver.is_closed());
             driver.close().await;
-            drop(close);
         }
     }
 
