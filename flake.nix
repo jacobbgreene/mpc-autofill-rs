@@ -35,7 +35,7 @@
       {
         packages.default = pkgs.rustPlatform.buildRustPackage {
           pname = "mpc-autofill";
-          version = "0.1.0";
+          version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
           src = ./.;
 
           cargoLock.lockFile = ./Cargo.lock;

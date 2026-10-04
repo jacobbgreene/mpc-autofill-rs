@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 
 use crate::order::PROJECT_MAX_SIZE;
+use crate::validation::{validate_drive_id, validate_field, MAX_CARD_RECORDS};
 use crate::{Card, Error, Face, Order, Result, Source};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -103,16 +104,7 @@ fn resolve(
         .iter()
         .find(|s| s.face == face && s.query.eq_ignore_ascii_case(query))
     {
-        if selection.drive_id.is_empty()
-            || !selection
-                .drive_id
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-        {
-            return Err(Error::Invalid(
-                "selected artwork has an invalid Google Drive ID".into(),
-            ));
-        }
+        validate_drive_id(&selection.drive_id)?;
         return Ok(Some(Card {
             drive_id: selection.drive_id.clone(),
             source: Source::GoogleDrive,
@@ -175,6 +167,7 @@ fn is_section_heading(line: &str) -> bool {
 }
 
 fn parse_line(line: &str, number: usize) -> Result<(u32, &str, Option<&str>)> {
+    validate_field(line, "decklist entry")?;
     let (count, names) = match line.split_once(char::is_whitespace) {
         Some((prefix, rest)) if prefix.chars().next().is_some_and(|c| c.is_ascii_digit()) => {
             let count: u32 = prefix.trim_end_matches(['x', 'X']).parse().map_err(|_| {
@@ -209,7 +202,10 @@ impl Order {
             // Keep the submitted name when it still identifies this image.
             if let Some(query) = card.query.as_deref() {
                 let matches = candidates(face, query);
-                if matches.len() == 1 && matches[0].drive_id == card.drive_id {
+                if matches.len() == 1
+                    && matches[0].drive_id == card.drive_id
+                    && matches[0].source == card.source
+                {
                     return query.to_owned();
                 }
             }
@@ -251,10 +247,11 @@ impl Order {
                 .filter(|back| !back.slots.is_disjoint(&front.slots))
                 .count()
                 > 1;
-            if let Some(back) = backs
-                .first()
-                .filter(|c| mixed_backs || Some(&c.drive_id) != self.cardback_id.as_ref())
-            {
+            if let Some(back) = backs.first().filter(|c| {
+                mixed_backs
+                    || c.source != Source::GoogleDrive
+                    || Some(&c.drive_id) != self.cardback_id.as_ref()
+            }) {
                 name.push_str(" | ");
                 name.push_str(&unique_label(back, &self.backs));
             }
@@ -291,7 +288,23 @@ impl Order {
                 "decklist is too large; use text under 1 MB".into(),
             ));
         }
+        if selections.len() > MAX_CARD_RECORDS {
+            return Err(Error::Invalid("too many artwork selections".into()));
+        }
+        for selection in selections {
+            validate_drive_id(&selection.drive_id)?;
+            validate_field(&selection.name, "artwork name")?;
+            validate_field(&selection.query, "artwork query")?;
+            if !matches!(selection.face.as_str(), "front" | "back") {
+                return Err(Error::Invalid("choose a front or back image".into()));
+            }
+        }
         for (index, line) in text.lines().enumerate() {
+            if index >= 20_000 || entries.len() >= MAX_CARD_RECORDS {
+                return Err(Error::Invalid(
+                    "decklist has too many lines or entries".into(),
+                ));
+            }
             let line = line.trim().trim_start_matches('\u{feff}');
             if line.is_empty()
                 || line.starts_with('#')
@@ -394,7 +407,9 @@ impl Order {
             preview.needs_common_back |= back_name.is_none() && back.is_none();
             if back_name.is_none() {
                 if let Some(back) = &back {
-                    if Some(&back.drive_id) == self.cardback_id.as_ref() {
+                    if back.source == Source::GoogleDrive
+                        && Some(&back.drive_id) == self.cardback_id.as_ref()
+                    {
                         preview.common_back = Some(back.clone());
                     }
                 }
@@ -420,7 +435,7 @@ impl Order {
         Some(
             self.backs
                 .iter()
-                .find(|c| &c.drive_id == id)
+                .find(|c| &c.drive_id == id && c.source == Source::GoogleDrive)
                 .cloned()
                 .unwrap_or_else(|| Card {
                     drive_id: id.clone(),
@@ -468,7 +483,10 @@ impl Order {
                 (entry.back, &mut order.backs),
             ] {
                 if let Some(mut card) = card {
-                    if let Some(existing) = cards.iter_mut().find(|c| c.drive_id == card.drive_id) {
+                    if let Some(existing) = cards
+                        .iter_mut()
+                        .find(|c| c.drive_id == card.drive_id && c.source == card.source)
+                    {
                         existing.slots.extend(&slots);
                     } else {
                         card.slots = slots.clone();
@@ -478,7 +496,7 @@ impl Order {
             }
             slot += entry.quantity;
         }
-        order.validate()?;
+        order.validate_for_autofill()?;
         Ok(order)
     }
 }
@@ -691,6 +709,31 @@ mod tests {
             .unwrap()
             .issues
             .is_empty());
+    }
+
+    #[test]
+    fn hostile_selections_and_oversized_entry_lists_leave_original_unchanged() {
+        let original = order();
+        for id in [
+            "../escape".to_owned(),
+            "art#/../../escape".to_owned(),
+            "a".repeat(257),
+        ] {
+            let selection = ArtworkSelection {
+                query: "New Card".into(),
+                face: "front".into(),
+                drive_id: id,
+                name: "New Card.png".into(),
+            };
+            assert!(original
+                .preview_decklist("1 New Card", &[selection.clone()])
+                .is_err());
+            assert!(original.edit_decklist("1 New Card", &[selection]).is_err());
+        }
+        assert!(original
+            .preview_decklist(&"1 Island\n".repeat(MAX_CARD_RECORDS + 1), &[])
+            .is_err());
+        assert_eq!(original, order());
     }
     #[test]
     fn non_ascii_names_are_not_conflated() {

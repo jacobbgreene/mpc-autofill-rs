@@ -16,7 +16,9 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::files::write_atomic;
+use crate::local_artwork::LocalArtwork;
 use crate::saved_decks::SavedDecks;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 /// How many images to fetch and process at once.
 const DOWNLOAD_CONCURRENCY: usize = 8;
@@ -57,6 +59,14 @@ pub enum Command {
         selection: ArtworkSelection,
         reply: Reply<OrderSummary>,
     },
+    ApproveLocalImage {
+        drive_id: String,
+        reply: Reply<OrderSummary>,
+    },
+    ReplaceLocalImage {
+        drive_id: String,
+        reply: Reply<OrderSummary>,
+    },
     SaveOrder {
         path: Option<PathBuf>,
         reply: Reply<OrderSummary>,
@@ -90,6 +100,7 @@ pub struct CardView {
     /// True for the order's common cardback, so the UI can set it apart.
     pub cardback: bool,
     pub source: Source,
+    pub local_approved: bool,
 }
 
 // Event payloads. `Clone` is required by Tauri's `Emitter::emit`; all are tiny.
@@ -97,6 +108,7 @@ pub struct CardView {
 #[derive(Serialize, Clone)]
 struct DownloadEvent {
     drive_id: String,
+    source: Source,
     ok: bool,
     error: Option<String>,
 }
@@ -104,6 +116,7 @@ struct DownloadEvent {
 #[derive(Serialize, Clone)]
 struct CardStatusEvent {
     drive_id: String,
+    source: Source,
     face: &'static str,
     status: &'static str,
 }
@@ -111,6 +124,7 @@ struct CardStatusEvent {
 #[derive(Serialize, Clone)]
 struct ThumbReadyEvent {
     drive_id: String,
+    source: Source,
     path: Option<String>,
     error: Option<String>,
 }
@@ -205,6 +219,12 @@ impl Session {
             } => {
                 let _ = reply.send(self.change_artwork(&drive_id, &selection));
             }
+            Command::ApproveLocalImage { drive_id, reply } => {
+                let _ = reply.send(self.review_local_image(&drive_id, false).await);
+            }
+            Command::ReplaceLocalImage { drive_id, reply } => {
+                let _ = reply.send(self.review_local_image(&drive_id, true).await);
+            }
             Command::SaveOrder { path, reply } => {
                 let _ = reply.send(self.save_order(path).await);
             }
@@ -223,7 +243,8 @@ struct Session {
     order: Option<Order>,
     cards_dir: PathBuf,
     /// Drive id -> path of a successfully fetched image, ready to upload.
-    downloaded: HashMap<String, PathBuf>,
+    downloaded: HashMap<(Source, String), PathBuf>,
+    local_artwork: Option<LocalArtwork>,
     driver: Option<Driver>,
     post: Option<PostProcess>,
     order_path: PathBuf,
@@ -246,6 +267,7 @@ impl Session {
             order: None,
             cards_dir: PathBuf::new(),
             downloaded: HashMap::new(),
+            local_artwork: None,
             driver: None,
             post: Some(PostProcess::default()),
             order_path: PathBuf::new(),
@@ -257,17 +279,7 @@ impl Session {
     async fn load_order(&mut self, path: PathBuf) -> Result<OrderSummary, String> {
         let order = Order::from_file(&path).await.map_err(|e| e.to_string())?;
 
-        // Images land in a `cards/` folder beside the order file. Authorize that
-        // exact folder for the asset protocol so thumbnails load regardless of
-        // where the order file lives.
-        self.cards_dir = path.parent().unwrap_or(&path).join("cards");
-        // Recursive so the `thumbs/` subfolder is covered too.
-        let _ = self
-            .app
-            .asset_protocol_scope()
-            .allow_directory(&self.cards_dir, true);
-        self.downloaded.clear();
-
+        self.prepare_cache(&path)?;
         self.order_path = path;
         self.dirty = false;
         self.order = Some(order);
@@ -303,6 +315,12 @@ impl Session {
                 slots: card.slots.iter().copied().collect(),
                 cardback: face == Face::Back && cardback_id == Some(card.drive_id.as_str()),
                 source: card.source,
+                local_approved: card.source == Source::LocalFile
+                    && self
+                        .local_artwork
+                        .as_ref()
+                        .and_then(|local| local.get(&card.drive_id))
+                        .is_some(),
             })
             .collect();
         let summary = OrderSummary {
@@ -328,23 +346,7 @@ impl Session {
         let order = options
             .create(text, selections)
             .map_err(|e| e.to_string())?;
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|e| e.to_string())?
-            .as_nanos();
-        let cards_dir = self
-            .app
-            .path()
-            .app_cache_dir()
-            .map_err(|e| e.to_string())?
-            .join("drafts")
-            .join(stamp.to_string())
-            .join("cards");
-        self.app
-            .asset_protocol_scope()
-            .allow_directory(&cards_dir, true)
-            .map_err(|e| e.to_string())?;
-        self.cards_dir = cards_dir;
+        self.prepare_cache(std::path::Path::new(""))?;
         self.order_path = PathBuf::new();
         self.downloaded.clear();
         self.dirty = true;
@@ -422,47 +424,125 @@ impl Session {
         self.summary()
     }
 
+    fn prepare_cache(&mut self, order_path: &std::path::Path) -> Result<(), String> {
+        let root = self
+            .app
+            .path()
+            .app_cache_dir()
+            .map_err(|e| e.to_string())?
+            .join("images-v2");
+        autofill_core::cache::private_directory(&root)?;
+        let local = LocalArtwork::new(&root, order_path)?;
+        for task in self.background.drain(..) {
+            task.abort();
+        }
+        self.cards_dir = root;
+        self.local_artwork = Some(local);
+        self.downloaded.clear();
+        Ok(())
+    }
+
+    async fn review_local_image(
+        &mut self,
+        reference: &str,
+        replace: bool,
+    ) -> Result<OrderSummary, String> {
+        let order = self.order.as_ref().ok_or("no order loaded")?;
+        let local = self
+            .local_artwork
+            .as_mut()
+            .ok_or("local image review is unavailable")?;
+        let app = self.app.clone();
+        let reviewed = local.review(order, reference, replace, |path| async move {
+            if replace {
+                let (send, receive) = oneshot::channel();
+                app.dialog().file().set_title("Choose replacement local artwork")
+                    .add_filter("Images", &["png", "jpg", "jpeg", "webp"])
+                    .pick_file(move |value| { let _ = send.send(value); });
+                receive.await.map_err(|e| e.to_string())?.map(|path| path.into_path().map_err(|e| e.to_string())).transpose()
+            } else {
+                let (send, receive) = oneshot::channel();
+                app.dialog().message(format!("Allow this deck to read the image below and upload a copy to MakePlayingCards when you start autofill?\n\n{}\n\nOnly JPEG, PNG and WebP images are accepted. The original file will not be changed.", path.display()))
+                    .title("Allow local image")
+                    .buttons(MessageDialogButtons::OkCancelCustom("Allow image".into(), "Cancel".into()))
+                    .show(move |value| { let _ = send.send(value); });
+                Ok(receive.await.map_err(|e| e.to_string())?.then_some(path))
+            }
+        }).await?;
+        let Some(reviewed) = reviewed else {
+            return self.summary();
+        };
+        let new_reference = reviewed.reference;
+        if replace && new_reference != reference {
+            let order = self.order.as_mut().expect("order checked above");
+            for card in order.fronts.iter_mut().chain(order.backs.iter_mut()) {
+                if card.source == Source::LocalFile && card.drive_id == reference {
+                    card.drive_id = new_reference.clone();
+                }
+            }
+            self.downloaded.clear();
+            self.dirty = true;
+        }
+        self.summary()
+    }
+
     async fn download(&mut self) -> Result<(), String> {
         let order = self.order.as_ref().ok_or("no order loaded")?;
+        // The production gate validates the full order and every local grant
+        // before creating a network job or starting Chrome.
+        let approved = self
+            .local_artwork
+            .as_ref()
+            .ok_or("image session is unavailable")?
+            .approved_paths(order)?;
+        self.downloaded.extend(approved);
         let client = download::build_client();
-
-        // Own each job's id so it can move into a download task while the order
-        // stays put for the fill phase.
+        let mut seen = HashSet::new();
         let jobs: Vec<DownloadJob> = order
             .images()
+            .filter(|(_, card)| {
+                card.source == Source::GoogleDrive && seen.insert(card.drive_id.clone())
+            })
             .map(|(_, card)| DownloadJob {
                 drive_id: card.drive_id.clone(),
                 source: card.source,
-                dest: self.cards_dir.join(card.file_name()),
+                dest: self.cards_dir.join(autofill_core::cache::image_key(
+                    "drive",
+                    &card.drive_id,
+                    "original-800dpi-v2",
+                )),
             })
             .collect();
-
         let post = self.post;
         let client_ref = &client;
         let mut outcomes = stream::iter(jobs)
             .map(|job| async move { download::download_one(job, client_ref, post).await })
             .buffer_unordered(DOWNLOAD_CONCURRENCY);
-
+        let mut failures = 0;
         while let Some(DownloadOutcome { drive_id, result }) = outcomes.next().await {
-            let event = match result {
-                Ok(full) => {
-                    // `drive_id` has two owners here — the event and the map — so
-                    // one clone is unavoidable; everything else moves.
-                    let event = DownloadEvent {
-                        drive_id: drive_id.clone(),
-                        ok: true,
-                        error: None,
-                    };
-                    self.downloaded.insert(drive_id, full);
-                    event
+            let error = match result {
+                Ok(path) => {
+                    self.downloaded
+                        .insert((Source::GoogleDrive, drive_id.clone()), path);
+                    None
                 }
-                Err(error) => DownloadEvent {
-                    drive_id,
-                    ok: false,
-                    error: Some(error),
-                },
+                Err(error) => {
+                    failures += 1;
+                    Some(error)
+                }
             };
-            let _ = self.app.emit("download-progress", event);
+            let _ = self.app.emit(
+                "download-progress",
+                DownloadEvent {
+                    drive_id,
+                    source: Source::GoogleDrive,
+                    ok: error.is_none(),
+                    error,
+                },
+            );
+        }
+        if failures > 0 {
+            return Err(format!("Could not prepare {failures} artwork image(s). Review the highlighted cards and retry."));
         }
         Ok(())
     }
@@ -486,9 +566,17 @@ impl Session {
         if self.driver.is_none() {
             self.emit_phase("starting-browser");
             let chrome = std::env::var("CHROME").ok();
-            let driver = Driver::launch(chrome.as_deref())
-                .await
-                .map_err(|e| e.to_string())?;
+            let driver = Driver::launch(
+                chrome.as_deref(),
+                &self
+                    .app
+                    .path()
+                    .app_data_dir()
+                    .map_err(|e| e.to_string())?
+                    .join("automation/browser"),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
             self.driver = Some(driver);
         }
 
@@ -566,17 +654,19 @@ impl Session {
         back_mode: Option<ImageMode>,
     ) -> Result<(), String> {
         for (_, card) in order.images().filter(|(f, _)| *f == face) {
-            let Some(path) = self.downloaded.get(&card.drive_id) else {
-                self.emit_card(&card.drive_id, face, "skipped");
-                continue;
+            let Some(path) = self.downloaded.get(&(card.source, card.drive_id.clone())) else {
+                return Err(
+                    "An artwork image is unavailable. Prepare images again before uploading."
+                        .into(),
+                );
             };
-            self.emit_card(&card.drive_id, face, "uploading");
+            self.emit_card(&card.drive_id, card.source, face, "uploading");
             let slots = effective_slots(face, back_mode, &card.slots);
             driver
                 .upload_and_insert(path, &slots)
                 .await
                 .map_err(|e| e.to_string())?;
-            self.emit_card(&card.drive_id, face, "inserted");
+            self.emit_card(&card.drive_id, card.source, face, "inserted");
         }
         Ok(())
     }
@@ -601,20 +691,50 @@ impl Session {
         let thumbs_dir = self.cards_dir.join("thumbs").join("640");
 
         let mut seen = HashSet::new();
-        let jobs: Vec<ThumbJob> = order
+        let mut jobs: Vec<ThumbJob> = order
             .images()
             .filter(|(_, card)| card.source == Source::GoogleDrive)
             .filter(|(_, card)| seen.insert(card.drive_id.as_str()))
             .map(|(_, card)| ThumbJob {
+                source: Source::GoogleDrive,
+                snapshot: None,
                 url: format!(
                     "https://drive.google.com/thumbnail?id={}&sz=w640",
                     card.drive_id
                 ),
-                path: thumbs_dir.join(format!("{}.jpg", card.drive_id)),
+                path: thumbs_dir.join(format!(
+                    "{}.jpg",
+                    autofill_core::cache::image_key("drive", &card.drive_id, "thumbnail-640-v2")
+                )),
                 drive_id: card.drive_id.clone(),
             })
             .collect();
 
+        for (_, card) in order
+            .images()
+            .filter(|(_, card)| card.source == Source::LocalFile)
+        {
+            if let Some(path) = self
+                .local_artwork
+                .as_ref()
+                .and_then(|local| local.get(&card.drive_id))
+            {
+                jobs.push(ThumbJob {
+                    drive_id: card.drive_id.clone(),
+                    source: Source::LocalFile,
+                    snapshot: Some(path.clone()),
+                    url: String::new(),
+                    path: thumbs_dir.join(format!(
+                        "{}.jpg",
+                        autofill_core::cache::image_key(
+                            "local",
+                            &path.to_string_lossy(),
+                            "thumbnail-640-v2"
+                        )
+                    )),
+                });
+            }
+        }
         let app = self.app.clone();
         self.background.retain(|task| !task.inner().is_finished());
         self.background
@@ -625,11 +745,12 @@ impl Session {
         let _ = self.app.emit("phase", PhaseEvent { phase });
     }
 
-    fn emit_card(&self, drive_id: &str, face: Face, status: &'static str) {
+    fn emit_card(&self, drive_id: &str, source: Source, face: Face, status: &'static str) {
         let _ = self.app.emit(
             "card-status",
             CardStatusEvent {
                 drive_id: drive_id.to_owned(),
+                source,
                 face: face_name(face),
                 status,
             },
@@ -765,6 +886,8 @@ const THUMBNAIL_EDGE: u32 = 640;
 
 struct ThumbJob {
     drive_id: String,
+    source: Source,
+    snapshot: Option<PathBuf>,
     url: String,
     path: PathBuf,
 }
@@ -778,21 +901,35 @@ async fn fetch_thumbnails(jobs: Vec<ThumbJob>, app: AppHandle) {
 
     let mut results = stream::iter(jobs)
         .map(|job| async move {
-            let result =
-                download::fetch_thumbnail(client_ref, &job.url, &job.path, THUMBNAIL_EDGE).await;
+            let result = if let Some(snapshot) = &job.snapshot {
+                autofill_core::local_files::snapshot_thumbnail(snapshot, &job.path, THUMBNAIL_EDGE)
+                    .await
+                    .map(|_| ())
+            } else {
+                download::fetch_thumbnail(client_ref, &job.url, &job.path, THUMBNAIL_EDGE).await
+            };
             (
                 job.drive_id,
+                job.source,
                 job.path,
                 result.err().map(|error| error.to_string()),
             )
         })
         .buffer_unordered(THUMBNAIL_CONCURRENCY);
 
-    while let Some((drive_id, path, error)) = results.next().await {
+    while let Some((drive_id, source, path, mut error)) = results.next().await {
+        if error.is_none() {
+            error = app
+                .asset_protocol_scope()
+                .allow_file(&path)
+                .err()
+                .map(|e| e.to_string());
+        }
         let _ = app.emit(
             "thumb-ready",
             ThumbReadyEvent {
                 drive_id,
+                source,
                 path: error.is_none().then(|| path.to_string_lossy().into_owned()),
                 error,
             },

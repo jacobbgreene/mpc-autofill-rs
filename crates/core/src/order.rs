@@ -9,6 +9,9 @@ use std::path::Path;
 
 use serde::Deserialize;
 
+use crate::validation::{
+    read_text_file_bounded, validate_drive_id, validate_field, validate_xml, MAX_XML_BYTES,
+};
 use crate::{Error, Result};
 
 /// The largest project a MakePlayingCards family site accepts.
@@ -20,7 +23,7 @@ pub enum Face {
     Back,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum Source {
     GoogleDrive,
     LocalFile,
@@ -106,11 +109,15 @@ impl Order {
             .and_then(|stem| stem.to_str())
             .unwrap_or("Project")
             .to_owned();
-        let xml = tokio::fs::read_to_string(path).await?;
+        let path = path.to_owned();
+        let xml = tokio::task::spawn_blocking(move || read_text_file_bounded(path, MAX_XML_BYTES))
+            .await
+            .map_err(|error| Error::Invalid(format!("could not read order: {error}")))??;
         Order::from_xml(&name, &xml)
     }
 
     pub fn from_xml(name: &str, xml: &str) -> Result<Order> {
+        validate_xml(xml)?;
         let raw: RawOrder = quick_xml::de::from_str(xml)?;
 
         let quantity: u32 = raw.details.quantity.trim().parse().map_err(|_| {
@@ -119,6 +126,7 @@ impl Order {
                 raw.details.quantity
             ))
         })?;
+        validate_quantity(quantity)?;
         let stock = Cardstock::parse(raw.details.stock.trim()).ok_or_else(|| {
             Error::Invalid(format!("unsupported cardstock '{}'", raw.details.stock))
         })?;
@@ -134,8 +142,11 @@ impl Order {
             .as_deref()
             .map(|id| id.trim_matches(|c| c == ' ' || c == '"').to_owned())
             .filter(|id| !id.is_empty());
-        let fronts = merge_cards(raw.fronts.cards);
-        let backs = build_backs(raw.backs.cards, cardback_id.as_deref(), quantity);
+        if let Some(id) = &cardback_id {
+            validate_drive_id(id)?;
+        }
+        let fronts = merge_cards(raw.fronts.cards, quantity)?;
+        let backs = build_backs(raw.backs.cards, cardback_id.as_deref(), quantity)?;
 
         let order = Order {
             name: name.to_owned(),
@@ -148,21 +159,58 @@ impl Order {
         Ok(order)
     }
 
-    pub(crate) fn validate(&self) -> Result<()> {
-        if self.details.quantity == 0 {
-            return Err(Error::Invalid("order has no cards".into()));
-        }
-        if self.details.quantity > PROJECT_MAX_SIZE {
-            return Err(Error::Invalid(format!(
-                "order quantity {} exceeds the maximum project size of {PROJECT_MAX_SIZE}",
-                self.details.quantity
-            )));
-        }
+    /// Validate an imported or edited order without granting access to local files.
+    /// Legacy orders may omit backs; execution requires `validate_for_autofill`.
+    pub fn validate(&self) -> Result<()> {
+        validate_quantity(self.details.quantity)?;
+        validate_field(&self.name, "order name")?;
         if self.details.stock == Cardstock::P10 && self.details.foil {
             return Err(Error::Invalid("plastic cardstock cannot be foil".into()));
         }
         if self.fronts.is_empty() {
             return Err(Error::Invalid("order has no front images".into()));
+        }
+        if let Some(id) = &self.cardback_id {
+            validate_drive_id(id)?;
+        }
+        for (face, cards) in [("front", &self.fronts), ("back", &self.backs)] {
+            if cards.len() > PROJECT_MAX_SIZE as usize {
+                return Err(Error::Invalid(format!(
+                    "order has too many {face} artwork records"
+                )));
+            }
+            let mut covered = BTreeSet::new();
+            for card in cards {
+                validate_card(card)?;
+                if card.slots.is_empty() || card.slots.len() > PROJECT_MAX_SIZE as usize {
+                    return Err(Error::Invalid(format!(
+                        "{face} artwork must have 1–{PROJECT_MAX_SIZE} slots"
+                    )));
+                }
+                for &slot in &card.slots {
+                    if slot >= self.details.quantity || !covered.insert(slot) {
+                        return Err(Error::Invalid(format!(
+                            "{face} slot {slot} is outside the order or assigned more than once"
+                        )));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn validate_for_autofill(&self) -> Result<()> {
+        self.validate()?;
+        for (face, cards) in [("front", &self.fronts), ("back", &self.backs)] {
+            let covered: BTreeSet<_> = cards
+                .iter()
+                .flat_map(|card| card.slots.iter().copied())
+                .collect();
+            if covered.len() != self.details.quantity as usize {
+                return Err(Error::Invalid(format!(
+                    "choose artwork for every {face} slot before autofill"
+                )));
+            }
         }
         Ok(())
     }
@@ -218,37 +266,49 @@ impl Order {
 
 /// Merge cards that share a Drive id into one, unioning their slot assignments and
 /// preserving first-seen order.
-fn merge_cards(raw: Vec<RawCard>) -> Vec<Card> {
+fn merge_cards(raw: Vec<RawCard>, quantity: u32) -> Result<Vec<Card>> {
+    if raw.len() > PROJECT_MAX_SIZE as usize {
+        return Err(Error::Invalid(
+            "order has too many artwork records on one face".into(),
+        ));
+    }
     let mut cards: Vec<Card> = Vec::with_capacity(raw.len());
     for card in raw {
-        let slots = parse_slots(&card.slots);
+        let slots = parse_slots(&card.slots, quantity)?;
         let source = match card.source_type.as_deref() {
             Some("Local File") => Source::LocalFile,
-            _ => Source::GoogleDrive,
+            None | Some("Google Drive") => Source::GoogleDrive,
+            Some(_) => {
+                return Err(Error::Invalid(
+                    "artwork has an unsupported source type".into(),
+                ))
+            }
         };
         let drive_id = card.id.trim_matches(|c| c == ' ' || c == '"').to_owned();
+        let card = Card {
+            drive_id,
+            source,
+            slots,
+            name: card.name,
+            query: card.query,
+        };
+        validate_card(&card)?;
 
         match cards
             .iter_mut()
-            .find(|existing| existing.drive_id == drive_id)
+            .find(|existing| existing.drive_id == card.drive_id && existing.source == card.source)
         {
-            Some(existing) => existing.slots.extend(slots),
-            None => cards.push(Card {
-                drive_id,
-                source,
-                slots,
-                name: card.name,
-                query: card.query,
-            }),
+            Some(existing) => existing.slots.extend(card.slots),
+            None => cards.push(card),
         }
     }
-    cards
+    Ok(cards)
 }
 
 /// Build the back face, filling any slots the order leaves uncovered with the
 /// common cardback image.
-fn build_backs(raw: Vec<RawCard>, cardback: Option<&str>, quantity: u32) -> Vec<Card> {
-    let mut backs = merge_cards(raw);
+fn build_backs(raw: Vec<RawCard>, cardback: Option<&str>, quantity: u32) -> Result<Vec<Card>> {
+    let mut backs = merge_cards(raw, quantity)?;
 
     let cardback_id = cardback.map(|id| id.trim_matches(|c| c == ' ' || c == '"'));
     if let Some(cardback_id) = cardback_id.filter(|id| !id.is_empty()) {
@@ -260,7 +320,10 @@ fn build_backs(raw: Vec<RawCard>, cardback: Option<&str>, quantity: u32) -> Vec<
             .filter(|slot| !covered.contains(slot))
             .collect();
         if !missing.is_empty() {
-            if let Some(existing) = backs.iter_mut().find(|card| card.drive_id == cardback_id) {
+            if let Some(existing) = backs
+                .iter_mut()
+                .find(|card| card.drive_id == cardback_id && card.source == Source::GoogleDrive)
+            {
                 existing.slots.extend(missing);
             } else {
                 backs.push(Card {
@@ -273,15 +336,67 @@ fn build_backs(raw: Vec<RawCard>, cardback: Option<&str>, quantity: u32) -> Vec<
             }
         }
     }
-    backs
+    Ok(backs)
 }
 
 /// Parse slot strings such as `"0"`, `"1,2,3"`, or `"[2, 4, 5, 6]"` into a set.
-fn parse_slots(text: &str) -> BTreeSet<u32> {
-    text.trim_matches(|c| c == '[' || c == ']')
-        .split(',')
-        .filter_map(|piece| piece.trim().parse().ok())
-        .collect()
+fn parse_slots(text: &str, quantity: u32) -> Result<BTreeSet<u32>> {
+    let text = text.trim();
+    let text = if text.starts_with('[') && text.ends_with(']') {
+        &text[1..text.len() - 1]
+    } else {
+        text
+    };
+    let mut slots = BTreeSet::new();
+    for (index, piece) in text.split(',').enumerate() {
+        if index >= PROJECT_MAX_SIZE as usize {
+            return Err(Error::Invalid("artwork has too many slot values".into()));
+        }
+        let piece = piece.trim();
+        if piece.is_empty() || !piece.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(Error::Invalid(
+                "artwork slots must be comma-separated nonnegative integers".into(),
+            ));
+        }
+        let slot: u32 = piece
+            .parse()
+            .map_err(|_| Error::Invalid("artwork slot is too large".into()))?;
+        if slot >= quantity {
+            return Err(Error::Invalid(format!(
+                "artwork slot {slot} is outside quantity {quantity}"
+            )));
+        }
+        slots.insert(slot);
+    }
+    Ok(slots)
+}
+
+fn validate_quantity(quantity: u32) -> Result<()> {
+    if !(1..=PROJECT_MAX_SIZE).contains(&quantity) {
+        return Err(Error::Invalid(format!(
+            "order quantity must be from 1 to {PROJECT_MAX_SIZE}"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_card(card: &Card) -> Result<()> {
+    match card.source {
+        Source::GoogleDrive => validate_drive_id(&card.drive_id)?,
+        Source::LocalFile => {
+            validate_field(&card.drive_id, "local artwork reference")?;
+            if card.drive_id.is_empty() {
+                return Err(Error::Invalid("local artwork reference is empty".into()));
+            }
+        }
+    }
+    if let Some(name) = &card.name {
+        validate_field(name, "artwork name")?;
+    }
+    if let Some(query) = &card.query {
+        validate_field(query, "artwork query")?;
+    }
+    Ok(())
 }
 
 // region raw XML shapes
@@ -389,18 +504,55 @@ mod tests {
 
     #[test]
     fn parses_slot_range_syntax() {
-        assert_eq!(parse_slots("[2, 4, 5, 6]"), BTreeSet::from([2, 4, 5, 6]));
-        assert_eq!(parse_slots("0"), BTreeSet::from([0]));
-        assert_eq!(parse_slots(""), BTreeSet::new());
+        assert_eq!(
+            parse_slots("[2, 4, 5, 6]", 7).unwrap(),
+            BTreeSet::from([2, 4, 5, 6])
+        );
+        assert_eq!(parse_slots("0", 1).unwrap(), BTreeSet::from([0]));
+        for invalid in [
+            "",
+            "[]",
+            "0,",
+            "0,,1",
+            "a,1",
+            "-1",
+            "+1",
+            "[0",
+            "0]",
+            "[[0]]",
+            "4294967296",
+            "7",
+        ] {
+            assert!(parse_slots(invalid, 7).is_err(), "{invalid:?}");
+        }
+        assert!(parse_slots(&vec!["0"; 613].join(","), 1).is_err());
     }
 
     #[test]
     fn rejects_oversized_orders() {
-        let xml = SAMPLE.replace("<quantity>3</quantity>", "<quantity>700</quantity>");
-        assert!(matches!(
-            Order::from_xml("big", &xml),
-            Err(Error::Invalid(_))
-        ));
+        for quantity in [0, 613, 700, u32::MAX] {
+            let xml = SAMPLE
+                .replace(
+                    "<quantity>3</quantity>",
+                    &format!("<quantity>{quantity}</quantity>"),
+                )
+                .replace("front_a", "invalid/id");
+            // The quantity error must happen before constructing fallback backs
+            // or examining card records (including this deliberately invalid ID).
+            let error = Order::from_xml("big", &xml).unwrap_err().to_string();
+            assert!(error.contains("order quantity"), "{quantity}: {error}");
+        }
+        let xml = SAMPLE.replace("<quantity>3</quantity>", "<quantity>612</quantity>");
+        let order = Order::from_xml("maximum", &xml).unwrap();
+        assert_eq!(
+            order
+                .backs
+                .iter()
+                .map(|card| card.slots.len())
+                .sum::<usize>(),
+            612
+        );
+        assert!(order.validate_for_autofill().is_err()); // fronts still cover only three slots
     }
 
     #[test]
@@ -428,5 +580,184 @@ mod tests {
             Order::from_xml("sample", &order.to_xml().unwrap()).unwrap(),
             order
         );
+    }
+
+    #[test]
+    fn every_xml_drive_reference_rejects_paths_and_url_metacharacters() {
+        for id in [
+            "../escape",
+            r"..\escape",
+            "/tmp/escape",
+            r"C:\escape",
+            r"\\server\share",
+            "art#/../../escape",
+            "art?x=y",
+            "art%2fescape",
+            "é",
+        ] {
+            for original in ["front_a", "back_x", "common_back"] {
+                assert!(
+                    Order::from_xml("hostile", &SAMPLE.replace(original, id)).is_err(),
+                    "{original}: {id}"
+                );
+            }
+        }
+        assert!(Order::from_xml("long ID", &SAMPLE.replace("front_a", &"a".repeat(257))).is_err());
+    }
+
+    #[test]
+    fn malformed_slots_and_conflicting_assignments_do_not_silently_disappear() {
+        for slots in ["bad", "-1", "0,broken", "3", "4294967295", "0,", ""] {
+            let xml = SAMPLE.replacen("<slots>0</slots>", &format!("<slots>{slots}</slots>"), 1);
+            assert!(Order::from_xml("bad slots", &xml).is_err(), "{slots:?}");
+        }
+        assert!(Order::from_xml(
+            "overlap",
+            &SAMPLE.replace("<slots>1</slots>", "<slots>0</slots>")
+        )
+        .is_err());
+        let overlapping_backs = SAMPLE.replace(
+            "</backs>",
+            "<card><id>other_back</id><slots>0</slots></card></backs>",
+        );
+        assert!(Order::from_xml("overlap", &overlapping_backs).is_err());
+    }
+
+    #[test]
+    fn source_is_validated_and_is_part_of_artwork_identity() {
+        let xml = SAMPLE.replace(
+            "<card><id>front_b</id>",
+            "<card><id>front_a</id><sourceType>Local File</sourceType>",
+        );
+        let order = Order::from_xml("mixed sources", &xml).unwrap();
+        assert_eq!(order.fronts.len(), 2);
+        assert_eq!(order.fronts[0].source, Source::GoogleDrive);
+        assert_eq!(order.fronts[0].slots, BTreeSet::from([0, 2]));
+        assert_eq!(order.fronts[1].source, Source::LocalFile);
+        assert_eq!(order.fronts[1].slots, BTreeSet::from([1]));
+        assert_eq!(
+            Order::from_xml("mixed sources", &order.to_xml().unwrap()).unwrap(),
+            order
+        );
+        for source in ["", "HTTP", "google drive"] {
+            let xml = SAMPLE.replacen(
+                "<id>front_a</id>",
+                &format!("<id>front_a</id><sourceType>{source}</sourceType>"),
+                1,
+            );
+            assert!(Order::from_xml("unknown source", &xml).is_err());
+        }
+    }
+
+    #[test]
+    fn legacy_missing_backs_can_be_opened_but_cannot_run() {
+        let xml = "<order><details><quantity>1</quantity><stock>(S30) Standard Smooth</stock></details><fronts><card><id>art</id><slots>0</slots></card></fronts></order>";
+        let order = Order::from_xml("repair", xml).unwrap();
+        assert!(order.validate().is_ok());
+        assert!(order.validate_for_autofill().is_err());
+        assert_eq!(
+            Order::from_xml("repair", &order.to_xml().unwrap()).unwrap(),
+            order
+        );
+    }
+
+    #[test]
+    fn hostile_xml_is_bounded_before_deserialization() {
+        let attributes = (0..9)
+            .map(|i| format!(" xmlns:n{i}=\"urn:{i}\""))
+            .collect::<String>();
+        let deep = format!(
+            "<order>{}x{}</order>",
+            "<nest>".repeat(17),
+            "</nest>".repeat(17)
+        );
+        let records = format!(
+            "<order>{}</order>",
+            "<card/>".repeat(crate::validation::MAX_CARD_RECORDS + 1)
+        );
+        let many_on_one_face = SAMPLE.replace(
+            "</fronts>",
+            &format!(
+                "{}</fronts>",
+                "<card><id>front_a</id><slots>0</slots></card>".repeat(613)
+            ),
+        );
+        let huge_field = SAMPLE.replace(
+            "Ace.png",
+            &"a".repeat(crate::validation::MAX_FIELD_BYTES + 1),
+        );
+        let chunked_field = SAMPLE.replace(
+            "Ace.png",
+            &format!("{}<![CDATA[{}]]>", "a".repeat(9000), "b".repeat(9000)),
+        );
+        let document_type =
+            format!("<!DOCTYPE order [<!ENTITY secret SYSTEM 'file:///never-read'>]>{SAMPLE}");
+        for xml in [
+            SAMPLE.replace("<order>", &format!("<order{attributes}>")),
+            deep,
+            records,
+            many_on_one_face,
+            huge_field,
+            chunked_field,
+            document_type,
+            format!("{SAMPLE}{SAMPLE}"),
+            " ".repeat(MAX_XML_BYTES + 1),
+        ] {
+            assert!(Order::from_xml("hostile", &xml).is_err());
+        }
+        // Ordinary comments, BOM, CRLF and predefined escaped characters remain compatible.
+        let xml = format!(
+            "\u{feff}<!-- exported order -->\r\n{}",
+            SAMPLE.replace("Ace.png", "Fire &amp; Ice.png")
+        );
+        assert!(Order::from_xml("normal", &xml).is_ok());
+    }
+
+    #[test]
+    fn final_validation_checks_orders_constructed_without_the_parser() {
+        let original = Order::from_xml("original", SAMPLE).unwrap();
+        let mut edited = original.clone();
+        edited.fronts[0].drive_id = "../escape".into();
+        assert!(edited.validate().is_err());
+        edited = original.clone();
+        edited.fronts[0].slots.insert(3);
+        assert!(edited.validate().is_err());
+        assert_eq!(original, Order::from_xml("original", SAMPLE).unwrap());
+        assert!(original.validate_for_autofill().is_ok());
+    }
+
+    #[test]
+    fn required_values_and_duplicate_fields_cannot_be_hidden_by_xml_shape() {
+        for replacement in [
+            "<id/>",
+            "<id>  </id>",
+            "<id>front_a</id><id>other</id>",
+            "<unrecognized>front_a</unrecognized>",
+            "<id/><sourceType>Local File</sourceType>",
+        ] {
+            let xml = SAMPLE.replacen("<id>front_a</id>", replacement, 1);
+            assert!(
+                Order::from_xml("missing or duplicate ID", &xml).is_err(),
+                "{replacement}"
+            );
+        }
+        for replacement in [
+            "<quantity>3</quantity><quantity>2</quantity>",
+            "<quantity/>",
+            "<unknown>3</unknown>",
+        ] {
+            assert!(Order::from_xml(
+                "invalid quantity",
+                &SAMPLE.replace("<quantity>3</quantity>", replacement)
+            )
+            .is_err());
+        }
+        assert!(Order::from_xml(
+            "duplicate attribute",
+            &SAMPLE.replace("<order>", "<order note=\"one\" note=\"two\">")
+        )
+        .is_err());
+        // Extra legacy metadata such as <bracket> remains accepted, within limits.
+        assert!(Order::from_xml("legacy", SAMPLE).is_ok());
     }
 }

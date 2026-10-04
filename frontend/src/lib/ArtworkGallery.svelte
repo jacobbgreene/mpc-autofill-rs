@@ -139,7 +139,12 @@
     void load(next - 1);
   }
   function close() {
-    if (!applying) dispatch("close");
+    if (!applying) {
+      // Close while the dialog is still mounted so native focus restoration
+      // runs before Svelte removes it from the document.
+      dialog.close();
+      dispatch("close");
+    }
   }
 </script>
 

@@ -1,7 +1,7 @@
 {
   "name": "mpc-autofill-frontend",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -16,10 +16,10 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
-    "@sveltejs/vite-plugin-svelte": "^3",
-    "svelte": "^4",
-    "svelte-check": "^3",
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "svelte": "^5.57.1",
+    "svelte-check": "^4",
     "typescript": "^5",
-    "vite": "^5"
+    "vite": "^8.3.2"
   }
 }

@@ -3,6 +3,7 @@ use std::collections::BTreeSet;
 use serde::Deserialize;
 
 use crate::decklist::{ArtworkSelection, DecklistPreview};
+use crate::validation::{validate_drive_id, validate_field};
 use crate::{Card, Cardstock, Details, Error, Order, Result, Source};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -60,6 +61,7 @@ impl NewOrderOptions {
                 }
             }
         }
+        edited.validate_for_autofill()?;
         Ok(edited)
     }
 
@@ -74,16 +76,8 @@ impl NewOrderOptions {
             return Err(Error::Invalid("plastic cardstock cannot be foil".into()));
         }
         let backs = if let Some(back) = &self.cardback {
-            if back.drive_id.is_empty()
-                || !back
-                    .drive_id
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-            {
-                return Err(Error::Invalid(
-                    "selected cardback has an invalid Google Drive ID".into(),
-                ));
-            }
+            validate_drive_id(&back.drive_id)?;
+            validate_field(&back.name, "cardback name")?;
             vec![Card {
                 drive_id: back.drive_id.clone(),
                 name: Some(back.name.clone()),
@@ -329,5 +323,16 @@ mod tests {
         opts.stock = Cardstock::P10;
         opts.foil = true;
         assert!(opts.preview("1 Island", &[]).is_err());
+    }
+
+    #[test]
+    fn cardback_selection_uses_the_shared_drive_id_limit() {
+        let mut opts = options();
+        opts.cardback = Some(CardbackSelection {
+            drive_id: "a".repeat(257),
+            name: "Back".into(),
+        });
+        assert!(opts.preview("1 Island", &[]).is_err());
+        assert!(opts.create("1 Island", &[]).is_err());
     }
 }

@@ -123,13 +123,13 @@
         value={downloadCompleted}
         max={cards.length}
         aria-label="Image preparation"
-      />
+      ></progress>
     {:else if uploading && faceCounts.total}
       <progress
         value={faceCounts.inserted + faceCounts.skipped}
         max={faceCounts.total}
         aria-label={`Processing ${activeFace} images`}
-      />
-    {:else}<progress aria-label="Setting up MakePlayingCards" />{/if}
+      ></progress>
+    {:else}<progress aria-label="Setting up MakePlayingCards"></progress>{/if}
   {/if}
 </section>

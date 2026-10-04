@@ -7,6 +7,7 @@
 mod artwork;
 mod artwork_thumbnail;
 mod files;
+mod local_artwork;
 mod saved_decks;
 mod session;
 mod shutdown;
@@ -127,6 +128,26 @@ async fn change_artwork(
 }
 
 #[tauri::command]
+async fn approve_local_image(
+    state: State<'_, AppState>,
+    drive_id: String,
+) -> Result<OrderSummary, String> {
+    state
+        .request(|reply| Command::ApproveLocalImage { drive_id, reply })
+        .await
+}
+
+#[tauri::command]
+async fn replace_local_image(
+    state: State<'_, AppState>,
+    drive_id: String,
+) -> Result<OrderSummary, String> {
+    state
+        .request(|reply| Command::ReplaceLocalImage { drive_id, reply })
+        .await
+}
+
+#[tauri::command]
 async fn save_order(
     state: State<'_, AppState>,
     path: Option<String>,
@@ -149,17 +170,12 @@ async fn read_decklist(path: String) -> Result<String, String> {
     {
         return Err("choose a .txt decklist".into());
     }
-    if tokio::fs::metadata(&path)
-        .await
-        .map_err(|e| e.to_string())?
-        .len()
-        > 1_000_000
-    {
-        return Err("decklist is too large; use a text file under 1 MB".into());
-    }
-    tokio::fs::read_to_string(path)
-        .await
-        .map_err(|e| e.to_string())
+    tokio::task::spawn_blocking(move || {
+        autofill_core::validation::read_text_file_bounded(&path, 1_000_000)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -231,6 +247,8 @@ fn main() {
             edit_decklist,
             change_artwork,
             save_order,
+            approve_local_image,
+            replace_local_image,
             read_decklist,
             preview_new_decklist,
             create_order,
