@@ -535,7 +535,7 @@
           aria-describedby={unmatched.length && !state.updating
             ? "decklist-help decklist-match-alert"
             : "decklist-help"}
-        />
+        ></textarea>
       </div>
       <div
         class="draft-diagnostics"

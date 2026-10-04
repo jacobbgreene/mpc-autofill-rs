@@ -20,6 +20,7 @@ use tokio::time::{sleep, Instant};
 
 use autofill_core::Details;
 
+use crate::profile::BrowserProfile;
 use crate::site::{self, Site};
 use crate::{js, Error, Result};
 
@@ -49,9 +50,66 @@ pub struct Driver {
     site: &'static Site,
     // Held so the browser connection and its event pump stay alive for the
     // driver's lifetime; `close` (or drop) tears both down.
-    browser: tokio::sync::Mutex<Browser>,
+    browser: tokio::sync::Mutex<OwnedBrowser>,
     handler: AbortTask,
     dialogs: AbortTask,
+}
+
+/// The child and its profile lock travel together during page initialization.
+/// A cancelled task cannot await Chrome, so its final fallback waits off the UI
+/// thread and retains the lock until the exact spawned child has exited.
+struct OwnedBrowser {
+    browser: Option<Browser>,
+    profile: Option<BrowserProfile>,
+}
+impl std::ops::Deref for OwnedBrowser {
+    type Target = Browser;
+    fn deref(&self) -> &Browser {
+        self.browser.as_ref().expect("owned browser")
+    }
+}
+impl std::ops::DerefMut for OwnedBrowser {
+    fn deref_mut(&mut self) -> &mut Browser {
+        self.browser.as_mut().expect("owned browser")
+    }
+}
+impl Drop for OwnedBrowser {
+    fn drop(&mut self) {
+        let Some(mut browser) = self.browser.take() else {
+            return;
+        };
+        let profile = std::sync::Arc::new(self.profile.take().expect("owned profile"));
+        if matches!(browser.try_wait(), Ok(Some(_))) {
+            return;
+        }
+        if let Some(child) = browser.get_mut_child() {
+            if let Err(error) = child.as_mut_inner().start_kill() {
+                tracing::warn!(%error, "could not terminate owned browser on cancellation");
+            }
+        }
+        let waiting_profile = std::sync::Arc::clone(&profile);
+        let waiter = std::thread::Builder::new().name("automation-browser-exit".into()).spawn(move || {
+            // This waiter only polls a child handle. It neither scans other
+            // processes nor guesses ownership from command lines or PIDs.
+            loop {
+                match browser.try_wait() {
+                    Ok(Some(_)) => break,
+                    Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+                    Err(error) => {
+                        tracing::error!(%error, "cannot verify owned browser exit; retaining its profile lock until app exit");
+                        std::mem::forget(waiting_profile);
+                        return;
+                    }
+                }
+            }
+            drop(browser);
+            drop(waiting_profile);
+        });
+        if let Err(error) = waiter {
+            tracing::error!(%error, "could not start browser-exit waiter; retaining profile lock until app exit");
+            std::mem::forget(profile);
+        }
+    }
 }
 
 // A JoinHandle alone detaches its task on drop, including failed/cancelled launch.
@@ -75,7 +133,14 @@ impl AutomationProfile {
                 std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
-            match std::fs::create_dir(&path) {
+            #[allow(unused_mut)]
+            let mut directory = std::fs::DirBuilder::new();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::DirBuilderExt;
+                directory.mode(0o700);
+            }
+            match directory.create(&path) {
                 Ok(()) => return Ok(Self(path)),
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
                 Err(error) => return Err(error),
@@ -108,6 +173,14 @@ impl BrowserShutdown for Browser {
             .transpose()
             .map_err(|error| error.to_string())?;
         Ok(())
+    }
+}
+impl BrowserShutdown for OwnedBrowser {
+    async fn graceful_close(&mut self) -> std::result::Result<(), String> {
+        BrowserShutdown::graceful_close(&mut **self).await
+    }
+    async fn force_close(&mut self) -> std::result::Result<(), String> {
+        BrowserShutdown::force_close(&mut **self).await
     }
 }
 async fn close_browser(browser: &mut impl BrowserShutdown) {
@@ -144,13 +217,36 @@ impl Driver {
     }
 
     /// Launch a visible Chrome and open the target site's starting page.
-    pub async fn launch(chrome_path: Option<&str>) -> Result<Driver> {
+    pub async fn launch(chrome_path: Option<&str>, profile_directory: &Path) -> Result<Driver> {
+        Self::launch_at(
+            chrome_path,
+            profile_directory,
+            site::MAKE_PLAYING_CARDS.starting_url(),
+            true,
+        )
+        .await
+    }
+
+    // Tests use this same ownership/launch path with about:blank and headless
+    // Chrome. Production always opens the fixed site in a visible window.
+    async fn launch_at(
+        chrome_path: Option<&str>,
+        profile_directory: &Path,
+        url: String,
+        visible: bool,
+    ) -> Result<Driver> {
         let site = &site::MAKE_PLAYING_CARDS;
+        let profile = BrowserProfile::acquire(profile_directory)
+            .map_err(|error| Error::stage("startup/browser-profile", error))?;
 
         let mut builder = BrowserConfig::builder()
-            .with_head()
+            .user_data_dir(profile.directory())
+            .respect_https_errors()
             .window_size(1200, 900)
             .viewport(None);
+        if visible {
+            builder = builder.with_head();
+        }
         if let Some(path) = chrome_path {
             builder = builder.chrome_executable(path);
         }
@@ -159,11 +255,15 @@ impl Driver {
             .map_err(Error::Site)
             .map_err(|error| Error::stage("startup/browser-launch", error))?;
 
-        reap_orphaned_automation_browsers().await;
-
         let (browser, mut handler) = Browser::launch(config)
             .await
-            .map_err(|error| Error::stage("startup/browser-launch", error.into()))?;
+            .map_err(|error| Error::stage("startup/browser-launch", Error::Site(format!(
+                "Could not start the automation browser. If an automation window remains from an interrupted run, close it and try again. {error}"
+            ))))?;
+        let browser = OwnedBrowser {
+            browser: Some(browser),
+            profile: Some(profile),
+        };
         let handler_task = AbortTask(tokio::spawn(async move {
             while let Some(event) = handler.next().await {
                 if matches!(event, Err(CdpError::Ws(_) | CdpError::Io(_))) {
@@ -172,7 +272,7 @@ impl Driver {
             }
         }));
         let page = browser
-            .new_page(site.starting_url())
+            .new_page(url)
             .await
             .map_err(|error| Error::stage("startup/new-page", error.into()))?;
         let dialogs = auto_accept_dialogs(&page)
@@ -190,6 +290,10 @@ impl Driver {
 
     /// Close the browser and stop its event pump. Kills the child Chrome process.
     pub async fn close(mut self) {
+        self.shutdown().await;
+    }
+
+    async fn shutdown(&mut self) {
         // Keep the event pump running until CDP close completes. The actor also
         // bounds the total shutdown time; dropping Browser kills its owned child.
         if self.browser.get_mut().try_wait().ok().flatten().is_none() {
@@ -1081,6 +1185,38 @@ fn is_context_turnover_error(error: &Error) -> bool {
 mod tests {
     use super::*;
 
+    // These latency checks exercise real Chrome processes. Overlapping browser
+    // launches on small CI runners consume the shutdown budget of other tests.
+    // Serialize fixtures, not browsers within a fixture: the ownership test
+    // still keeps its independent browser alive throughout both shutdown paths.
+    fn real_browser_fixture() -> std::sync::MutexGuard<'static, ()> {
+        static FIXTURE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        FIXTURE.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    async fn close_driver_and_wait_for_profile(driver: Driver, profile: &AutomationProfile) {
+        let budget = Duration::from_secs(5);
+        let started = std::time::Instant::now();
+        tokio::time::timeout(budget, async {
+            // Public close includes OwnedBrowser's drop fallback. The profile
+            // remains locked until that fallback has observed its child's exit.
+            driver.close().await;
+            loop {
+                if let Ok(owner) = BrowserProfile::acquire(&profile.0) {
+                    drop(owner);
+                    break;
+                }
+                sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("owned browser exits and releases its profile within five seconds of close");
+        assert!(
+            started.elapsed() <= budget,
+            "full browser close exceeded five seconds"
+        );
+    }
+
     struct StalledBrowser {
         terminated: bool,
         stall_kill: bool,
@@ -1135,74 +1271,199 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn failed_browser_launch_releases_its_profile_lock() {
+        let profile = AutomationProfile::create().unwrap();
+        let absent_browser = profile.0.join("not-a-browser");
+        let result = Driver::launch_at(
+            absent_browser.to_str(),
+            &profile.0,
+            "about:blank".into(),
+            false,
+        )
+        .await;
+        assert!(result.is_err());
+        let _next = BrowserProfile::acquire(&profile.0).unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "requires installed Chrome; drops only a test-owned about:blank browser"]
+    async fn cancelled_driver_releases_profile_only_after_child_exit() {
+        let _fixture = real_browser_fixture();
+        let profile = AutomationProfile::create().unwrap();
+        let chrome = std::env::var("CHROME").ok();
+        let driver = Driver::launch_at(chrome.as_deref(), &profile.0, "about:blank".into(), false)
+            .await
+            .unwrap();
+        drop(driver);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Ok(owner) = BrowserProfile::acquire(&profile.0) {
+                    drop(owner);
+                    break;
+                }
+                sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("cancelled child exits and profile lock is released");
+        // Acquiring the app lock must mean its previous browser has exited;
+        // otherwise Chrome refuses this restart on its persistent profile.
+        let next = Driver::launch_at(chrome.as_deref(), &profile.0, "about:blank".into(), false)
+            .await
+            .unwrap();
+        next.close().await;
+    }
+
+    #[test]
+    #[ignore = "requires installed Chrome; tests owned-child cleanup after runtime shutdown"]
+    fn browser_cleanup_keeps_working_after_async_runtime_shutdown() {
+        let _fixture = real_browser_fixture();
+        let profile = AutomationProfile::create().unwrap();
+        let chrome = std::env::var("CHROME").ok();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let driver = runtime
+            .block_on(Driver::launch_at(
+                chrome.as_deref(),
+                &profile.0,
+                "about:blank".into(),
+                false,
+            ))
+            .unwrap();
+        drop(runtime);
+        drop(driver);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Ok(owner) = BrowserProfile::acquire(&profile.0) {
+                drop(owner);
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "profile lock survived child cleanup"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let next =
+                Driver::launch_at(chrome.as_deref(), &profile.0, "about:blank".into(), false)
+                    .await
+                    .unwrap();
+            next.close().await;
+        });
+    }
+
+    #[tokio::test]
     #[ignore = "requires an installed Chrome; uses only about:blank"]
     async fn browser_shutdown_keeps_an_independent_browser_alive() {
-        async fn launch_test_browser() -> (Browser, AbortTask, AutomationProfile) {
-            let profile = AutomationProfile::create().unwrap();
-            let mut config = BrowserConfig::builder().user_data_dir(&profile.0);
-            if let Ok(chrome) = std::env::var("CHROME") {
-                config = config.chrome_executable(chrome);
-            }
-            let (browser, mut handler) = Browser::launch(config.build().unwrap()).await.unwrap();
-            let task = AbortTask(tokio::spawn(async move {
-                while handler.next().await.is_some() {}
-            }));
-            (browser, task, profile)
-        }
-        let (mut independent, _independent_task, _independent_profile) =
-            launch_test_browser().await;
-        let (mut owned, _owned_task, _owned_profile) = launch_test_browser().await;
-        close_browser(&mut owned).await;
-        assert!(owned.try_wait().unwrap().is_some());
-        assert!(independent.version().await.is_ok());
+        let _fixture = real_browser_fixture();
+        let independent_profile = AutomationProfile::create().unwrap();
+        let owned_profile = AutomationProfile::create().unwrap();
+        let chrome = std::env::var("CHROME").ok();
+        let independent = Driver::launch_at(
+            chrome.as_deref(),
+            &independent_profile.0,
+            "about:blank".into(),
+            false,
+        )
+        .await
+        .unwrap();
+        let owned = Driver::launch_at(
+            chrome.as_deref(),
+            &owned_profile.0,
+            "about:blank".into(),
+            false,
+        )
+        .await
+        .unwrap();
+
+        // A second app instance cannot launch on the live profile, and the
+        // failed attempt must not disturb either of the existing browsers.
+        let second = Driver::launch_at(
+            chrome.as_deref(),
+            &owned_profile.0,
+            "about:blank".into(),
+            false,
+        )
+        .await;
+        assert!(matches!(
+            second,
+            Err(Error::Stage {
+                stage: "startup/browser-profile",
+                ..
+            })
+        ));
+        assert!(owned.page.evaluate("1 + 1").await.is_ok());
+        assert!(independent.page.evaluate("1 + 1").await.is_ok());
+        close_driver_and_wait_for_profile(owned, &owned_profile).await;
+        assert!(independent.page.evaluate("1 + 1").await.is_ok());
 
         // A stopped event pump makes CDP close fail; the owned child must still exit.
-        let (mut stalled, stalled_task, _stalled_profile) = launch_test_browser().await;
-        drop(stalled_task);
+        // Relaunch the same persistent profile through production ownership.
+        let stalled = Driver::launch_at(
+            chrome.as_deref(),
+            &owned_profile.0,
+            "about:blank".into(),
+            false,
+        )
+        .await
+        .unwrap();
+        stalled.handler.0.abort();
         tokio::task::yield_now().await;
-        close_browser(&mut stalled).await;
-        assert!(stalled.try_wait().unwrap().is_some());
-        assert!(independent.version().await.is_ok());
-        close_browser(&mut independent).await;
+        close_driver_and_wait_for_profile(stalled, &owned_profile).await;
+        let restarted = Driver::launch_at(
+            chrome.as_deref(),
+            &owned_profile.0,
+            "about:blank".into(),
+            false,
+        )
+        .await
+        .unwrap();
+        assert!(restarted.page.evaluate("1 + 1").await.is_ok());
+        close_driver_and_wait_for_profile(restarted, &owned_profile).await;
+        assert!(independent.page.evaluate("1 + 1").await.is_ok());
+        independent.close().await;
     }
 
     #[tokio::test]
     #[ignore = "requires an installed Chrome; closes only a test-owned browser on about:blank"]
     async fn closing_browser_interrupts_stalled_work_and_a_fresh_browser_can_start() {
+        let _fixture = real_browser_fixture();
+        let profile = AutomationProfile::create().unwrap();
+        let chrome = std::env::var("CHROME").ok();
         for _ in 0..2 {
-            let profile = AutomationProfile::create().unwrap();
-            let mut config = BrowserConfig::builder().user_data_dir(&profile.0);
-            if let Ok(chrome) = std::env::var("CHROME") {
-                config = config.chrome_executable(chrome);
-            }
-            let (browser, mut handler) = Browser::launch(config.build().unwrap()).await.unwrap();
-            let task = AbortTask(tokio::spawn(async move {
-                while handler.next().await.is_some() {}
-            }));
-            let page = browser.new_page("about:blank").await.unwrap();
-            let closer = page.clone();
-            let driver = Driver {
-                page,
-                browser: tokio::sync::Mutex::new(browser),
-                handler: task,
-                site: &site::MAKE_PLAYING_CARDS,
-                dialogs: AbortTask(tokio::spawn(std::future::pending())),
-            };
+            let driver =
+                Driver::launch_at(chrome.as_deref(), &profile.0, "about:blank".into(), false)
+                    .await
+                    .unwrap();
             assert!(!driver.is_closed());
-            let close = AbortTask(tokio::spawn(async move {
-                let _ = closer
-                    .execute(chromiumoxide::cdp::browser_protocol::browser::CloseParams::default())
-                    .await;
-            }));
             tokio::time::timeout(Duration::from_secs(5), async {
+                // Browser.Close belongs to the root CDP connection, not the
+                // Page's target session. Release the mutex after the response
+                // so the observer can poll the owned child independently.
+                {
+                    let browser = driver.browser.lock().await;
+                    browser
+                        .execute(chromiumoxide::cdp::browser_protocol::browser::CloseParams::default())
+                        .await
+                        .expect("browser-scope close command should succeed");
+                }
                 tokio::select! {
                     _ = driver.wait_until_closed() => {},
                     _ = std::future::pending::<()>() => panic!("stalled work unexpectedly finished"),
                 }
-            }).await.expect("browser close should interrupt stalled work");
-            assert!(driver.is_closed());
-            driver.close().await;
-            drop(close);
+                assert!(driver.is_closed());
+                driver.close().await;
+                // Connection closure can precede child exit. Allow the owned
+                // drop fallback to finish before restarting this same profile,
+                // within the original command-to-cleanup five-second budget.
+                loop {
+                    if let Ok(owner) = BrowserProfile::acquire(&profile.0) {
+                        drop(owner);
+                        break;
+                    }
+                    sleep(Duration::from_millis(20)).await;
+                }
+            }).await.expect("browser close, stalled-work interruption and profile release should finish within five seconds");
         }
     }
 
@@ -1861,78 +2122,6 @@ mod tests {
         )));
         assert!(!is_context_turnover_error(&Error::Cdp(CdpError::Timeout)));
     }
-}
-
-/// chromiumoxide always launches Chrome with a fixed
-/// `--user-data-dir=$TMP/chromiumoxide-runner` (its default when no data dir is
-/// configured). A Chrome orphaned by a killed or crashed run keeps that profile
-/// and makes every subsequent launch fail — the new process forwards to the
-/// live one and exits, surfacing as a launch error or the 20s launch timeout.
-/// `Driver::launch` only runs when this session holds no live driver, so any
-/// process on that profile belongs to a dead instance and is safe to reap.
-/// Linux-only and best-effort; other platforms keep the pre-existing behavior.
-#[cfg(target_os = "linux")]
-async fn reap_orphaned_automation_browsers() {
-    let profile = std::env::temp_dir().join("chromiumoxide-runner");
-    let needle = format!("--user-data-dir={}", profile.display()).into_bytes();
-
-    // chromiumoxide's default launch always includes this flag too; requiring
-    // both keeps stray tools that merely mention the profile path from matching.
-    let debugger_flag: &[u8] = b"--remote-debugging-port";
-    let mut pids: Vec<libc::pid_t> = Vec::new();
-    if let Ok(entries) = std::fs::read_dir("/proc") {
-        for entry in entries.flatten() {
-            let Ok(pid) = entry.file_name().to_string_lossy().parse::<libc::pid_t>() else {
-                continue;
-            };
-            if pid == std::process::id() as libc::pid_t {
-                continue;
-            }
-            let Ok(cmdline) = std::fs::read(entry.path().join("cmdline")) else {
-                continue;
-            };
-            // Substring search, not argv matching: NixOS wrappers repack the
-            // whole command line into argv[0], and Chrome's child processes
-            // inherit the flags, so this catches the entire tree of any
-            // browser on the automation profile.
-            if contains_subslice(&cmdline, &needle) && contains_subslice(&cmdline, debugger_flag) {
-                pids.push(pid);
-            }
-        }
-    }
-    if pids.is_empty() {
-        return;
-    }
-
-    tracing::warn!("reaping orphaned automation browser process(es): {pids:?}");
-    for &pid in &pids {
-        unsafe { libc::kill(pid, libc::SIGTERM) };
-    }
-    // SIGTERM lets Chrome shut down cleanly and release its profile lock;
-    // escalate to SIGKILL only for stragglers.
-    let deadline = Instant::now() + Duration::from_secs(2);
-    loop {
-        pids.retain(|&pid| unsafe { libc::kill(pid, 0) } == 0);
-        if pids.is_empty() || Instant::now() >= deadline {
-            break;
-        }
-        sleep(Duration::from_millis(100)).await;
-    }
-    for &pid in &pids {
-        unsafe { libc::kill(pid, libc::SIGKILL) };
-    }
-}
-
-#[cfg(not(target_os = "linux"))]
-async fn reap_orphaned_automation_browsers() {}
-
-#[cfg(target_os = "linux")]
-fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
-    !needle.is_empty()
-        && haystack.len() >= needle.len()
-        && haystack
-            .windows(needle.len())
-            .any(|window| window == needle)
 }
 
 /// Auto-accept any `alert`/`confirm`/`beforeunload` dialog the editor raises;

@@ -5,6 +5,7 @@
 
 pub mod driver;
 mod js;
+mod profile;
 pub mod site;
 
 pub use driver::{Driver, ImageMode};

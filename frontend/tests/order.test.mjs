@@ -5,6 +5,8 @@ import {
   filterCards,
   placementCounts,
   artworkQuery,
+  cardKey,
+  needsAttention,
 } from "../src/lib/order.ts";
 
 const card = (face, status = "pending", extra = {}) => ({
@@ -15,6 +17,25 @@ const card = (face, status = "pending", extra = {}) => ({
   slots: [0],
   cardback: face === "back",
   ...extra,
+});
+
+test("local consent remains actionable independently of download and placement status", () => {
+  const pending = card("front", "pending", { source: "LocalFile", local_approved: false });
+  assert.equal(needsAttention(pending), true);
+  assert.equal(needsAttention({ ...pending, local_approved: undefined }), true);
+  assert.deepEqual(filterCards([pending, card("back")], "attention", ""), [pending]);
+  const approved = { ...pending, local_approved: true };
+  assert.equal(needsAttention(approved), false);
+  assert.equal(needsAttention({ ...approved, status: "download-failed" }), true);
+});
+
+test("local and remote images with identical IDs keep separate cache and progress identities", () => {
+  const remote = card("front", "pending", { source: "GoogleDrive" });
+  const local = card("front", "pending", { source: "LocalFile", local_approved: true });
+  assert.notEqual(cardKey(remote), cardKey(local));
+  const updated = patchCards([remote, local], "shared", { status: "downloaded" }, undefined, "GoogleDrive");
+  assert.equal(updated[0].status, "downloaded");
+  assert.equal(updated[1].status, "pending");
 });
 
 test("front placement never marks a shared back image as inserted", () => {

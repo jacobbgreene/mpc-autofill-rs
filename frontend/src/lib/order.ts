@@ -20,12 +20,14 @@ export type Card = {
   thumbStatus?: "loading" | "ready" | "failed";
   thumbError?: string;
   source?: "GoogleDrive" | "LocalFile";
+  local_approved?: boolean;
   dpi?: number | null;
   status: Status;
   error?: string;
 };
 
 export type OrderSummary = {
+  session_id?: number;
   name: string;
   quantity: number;
   stock: string;
@@ -45,9 +47,10 @@ export const statusLabels: Record<Status, string> = {
   skipped: "Skipped",
 };
 
-export const cardKey = (card: Pick<Card, "face" | "drive_id">) =>
-  `${card.face}:${card.drive_id}`;
+export const cardKey = (card: Pick<Card, "face" | "drive_id" | "source">) =>
+  `${card.face}:${card.source === "LocalFile" ? "local:" : ""}${card.drive_id}`;
 export const needsAttention = (card: Card) =>
+  (card.source === "LocalFile" && !card.local_approved) ||
   card.status === "download-failed" ||
   card.status === "skipped" ||
   card.status === "interrupted";
@@ -106,9 +109,10 @@ export function patchCards(
   driveId: string,
   change: Partial<Card>,
   face?: Face,
+  source?: Card["source"],
 ): Card[] {
   return cards.map((card) =>
-    card.drive_id === driveId && (!face || card.face === face)
+    card.drive_id === driveId && (!face || card.face === face) && (!source || (card.source ?? "GoogleDrive") === source)
       ? { ...card, ...change }
       : card,
   );

@@ -2,6 +2,7 @@
 name = "autofill-automation"
 version.workspace = true
 edition.workspace = true
+rust-version = "1.89"
 license.workspace = true
 
 [dependencies]
@@ -17,7 +18,3 @@ chromiumoxide = "0.9"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
-
-# Signals for reaping orphaned automation browsers before launch (driver.rs).
-[target.'cfg(target_os = "linux")'.dependencies]
-libc = "0.2"

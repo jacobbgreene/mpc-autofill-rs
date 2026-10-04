@@ -35,7 +35,7 @@
       {
         packages.default = pkgs.rustPlatform.buildRustPackage {
           pname = "mpc-autofill";
-          version = "0.1.0";
+          version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
           src = ./.;
 
           cargoLock.lockFile = ./Cargo.lock;
@@ -43,7 +43,7 @@
 
           npmDeps = pkgs.fetchNpmDeps {
             src = ./frontend;
-            hash = "sha256-ouWioaqTbYxpC0CuHOaouSSrnaT1C2pfVDO+6tDPlww=";
+            hash = "sha256-OvX7I8mkPQNg3/SZtQHY5ixsVcJgJDyr48KsFGWS8Ro=";
           };
           npmRoot = "frontend";
 

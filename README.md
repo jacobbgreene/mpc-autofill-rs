@@ -261,12 +261,39 @@ confirmation explains that closing stops the operation and closes its automation
 browser. Repeated close requests share one confirmation. A failed close offers
 Retry. Shutdown cancels network work, allows three seconds for graceful cleanup,
 and bounds final cleanup so process exit completes within five seconds. Browser
-profile selection and the existing Linux startup recovery behavior are unchanged.
+ownership uses a dedicated persistent profile in the app's data directory,
+protected by an OS lock. The previous generic browser profile is left untouched;
+the first autofill after this upgrade requires signing in again. Startup and
+shutdown never scan for or terminate other Chrome processes. Browser certificate
+validation and Chrome's sandbox remain enabled.
+
+Orders containing local file references show **Review local images**. Each image
+requires a native **Allow image** confirmation, or you can choose a replacement
+with the native file picker. Before approval, the app does not open, preview,
+download, or upload the referenced file. Approved JPEG, PNG and WebP images are
+copied into a private session cache; later changes to the original cannot change
+what gets uploaded. References stay in the XML, and replacements still require
+**Save**. Approval expires when another order is opened or the app exits.
+
+Generated artwork is cached in the app cache, never in a `cards/` folder beside
+an imported order. Cache filenames use source-specific hashes, and the webview
+can access only preview files explicitly granted by the backend. Local artwork
+must be an ordinary file: UNC paths, device paths, alternate data streams,
+and symbolic links/junctions are rejected. Mapped drives and mounted filesystems
+use the same ordinary-file checks and still require explicit approval.
+
+Import limits are enforced before constructing the deck: 612 cards, 8 MiB XML,
+1 MB text lists, and bounded XML depth, records and fields. Artwork downloads are
+limited to 64 MiB per original and 8 MiB per thumbnail, with a 64 megapixel and
+256 MiB decoded-image buffer limit. One image is decoded at a time; decoder
+working memory is additional to these buffer limits. An invalid or interrupted
+image is never treated as a
+completed cache entry; incomplete downloads block autofill and can be retried.
 
 Keyboard shortcuts:
 `Ctrl/Cmd+F` searches cards, `Ctrl/Cmd+S` saves, and `Ctrl/Cmd+Shift+S` opens Save As.
 
-Frontend validation (Node 22.6+):
+Frontend validation (Node 22.12+ or Node 24):
 
 ```sh
 npm --prefix frontend run check
@@ -285,16 +312,34 @@ instead of Playwright's Chromium. The separate browser-lifetime integration test
 uses isolated test profiles and only `about:blank`:
 
 ```sh
-cargo test -p autofill-automation browser_shutdown_keeps_an_independent_browser_alive --locked -- --ignored
+cargo test -p autofill-automation --locked -- --ignored
 ```
 
 Before publishing the next patch, run both package smoke tests and exercise X /
 Alt+F4 on Windows and native close on Linux from the welcome screen, a saved deck,
 an unsaved import, a nested artwork gallery, and active autofill. Check both
 confirmation choices, automation-browser exit, and survival of an ordinary
-browser window. Include Linux restart after an interrupted autofill to check its
-existing recovery behavior. The mocked browser tests do not replace these native
+browser window. Include Linux restart after an interrupted autofill to check
+profile-lock recovery. The mocked browser tests do not replace these native
 acceptance checks or a signed-in upload test. Publishing is a separate step.
+
+Pull-request CI runs frontend checks, browser tests, Rust tests and isolated
+Chrome lifetime tests on Windows and Linux. The dependency gate audits all
+frontend dependencies (including build tools) and denies Rust vulnerabilities
+and unsoundness advisories. A separate Nix gate checks the npm dependency hash
+and builds the Linux package; its version is derived from Cargo.
+
+GTK3 currently requires the GLib 0.18 Rust binding. The repository vendors that
+binding with the narrow upstream fix for RUSTSEC-2024-0429; it does not replace
+system GLib. `node scripts/check-glib-backport.mjs` verifies every vendored file,
+and Linux CI runs the iterator regression with optimization. The audit also
+checks a temporary registry-shaped copy of the lockfile so future GLib
+advisories remain visible; only the integrity-verified fixed advisory is
+excluded from that additional scan. Review and remove
+this backport when Tauri's GTK dependencies support the corrected upstream
+series. Unmaintained transitive dependency notices remain visible in audit logs;
+they are not broad vulnerability exemptions. Windows signing remains a release
+follow-up requiring a signing identity; no signing credentials are stored here.
 
 The normal Rust suite runs offline with `nix develop --command cargo test --workspace --locked`.
 An optional live artwork-search check is available with:

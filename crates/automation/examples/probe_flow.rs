@@ -29,7 +29,8 @@ async fn main() {
     let chrome = std::env::var("CHROME").ok();
     eprintln!("CHROME={chrome:?}");
 
-    let driver = match Driver::launch(chrome.as_deref()).await {
+    let profile = std::env::temp_dir().join("mpc-autofill-probe-flow");
+    let driver = match Driver::launch(chrome.as_deref(), &profile).await {
         Ok(d) => {
             eprintln!("[{:>7.2?}] launch OK", t.elapsed());
             d

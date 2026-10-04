@@ -26,3 +26,8 @@ try {
 } finally {
     if (-not $app.HasExited) { Stop-Process -Id $app.Id }
 }
+
+if ($env:GITHUB_ACTIONS -eq 'true') {
+    node scripts/smoke-windows-ui.mjs $binary
+    if ($LASTEXITCODE -ne 0) { throw 'Installed Windows UI smoke failed' }
+}

@@ -6,6 +6,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { open, save, confirm } from "@tauri-apps/plugin-dialog";
   import Icon from "./lib/Icon.svelte";
+  import LocalImages from "./lib/LocalImages.svelte";
   import CardTile from "./lib/CardTile.svelte";
   import CardPreview from "./lib/CardPreview.svelte";
   import ProgressPanel from "./lib/ProgressPanel.svelte";
@@ -34,6 +35,8 @@
   } from "./lib/order";
 
   let summary: OrderSummary | null = null;
+  let reviewLocal = false;
+  let localBusy = false;
   let homePage: "welcome" | "saved" = "welcome";
   let cards: Card[] = [];
   let phase = "";
@@ -66,7 +69,7 @@
   let closeErrorDialog: HTMLDialogElement;
   const closeController = createCloseController({
     context: () => ({
-      dirty: !!summary?.dirty || draftDirty || artworkApplying,
+      dirty: !!summary?.dirty || draftDirty || artworkApplying || localBusy,
       running,
     }),
     confirm: (message, labels) =>
@@ -89,6 +92,8 @@
     { value: "back", label: "Backs" },
     { value: "attention", label: "Needs attention" },
   ];
+  $: localImages = cards.filter(card => card.source === "LocalFile");
+  $: unapprovedImages = localImages.filter(card => !card.local_approved);
   $: cardbacks = cards.filter((card) => card.cardback);
   $: filename = summary?.path.split(/[\\/]/).pop() || "Not saved yet";
   $: attentionCount = cards.filter(needsAttention).length;
@@ -96,16 +101,16 @@
   $: selectedCard = cards.find((card) => cardKey(card) === selectedKey) ?? null;
 
   // Coalesce event bursts without conflating a front's placement with its back.
-  let pending: { driveId: string; change: Partial<Card>; face?: Face }[] = [];
+  let pending: { driveId: string; change: Partial<Card>; face?: Face; source?: Card["source"]; sessionId?: number }[] = [];
   let frame: number | null = null;
   function flush() {
     frame = null;
     for (const update of pending)
-      cards = patchCards(cards, update.driveId, update.change, update.face);
+      if (update.sessionId === summary?.session_id) cards = patchCards(cards, update.driveId, update.change, update.face, update.source);
     pending = [];
   }
-  function patch(driveId: string, change: Partial<Card>, face?: Face) {
-    pending.push({ driveId, change, face });
+  function patch(driveId: string, change: Partial<Card>, face?: Face, source?: Card["source"], sessionId = summary?.session_id) {
+    pending.push({ driveId, change, face, source, sessionId });
     if (frame === null) frame = requestAnimationFrame(flush);
   }
 
@@ -130,18 +135,18 @@
             }),
           ),
           register(
-            listen<{ drive_id: string; ok: boolean; error?: string }>(
+            listen<{ drive_id: string; source?: Card["source"]; ok: boolean; error?: string }>(
               "download-progress",
               ({ payload }) => {
                 downloadCompleted = Math.min(
                   cards.length,
-                  downloadCompleted + 1,
+                  downloadCompleted + cards.filter(card => card.drive_id === payload.drive_id && (card.source ?? "GoogleDrive") === (payload.source ?? "GoogleDrive")).length,
                 );
                 if (!payload.ok) downloadFailures += 1;
                 patch(payload.drive_id, {
                   status: payload.ok ? "downloaded" : "download-failed",
                   error: payload.ok ? undefined : payload.error,
-                });
+                }, undefined, payload.source);
               },
             ),
           ),
@@ -155,19 +160,20 @@
             }),
           ),
           register(
-            listen<{ drive_id: string; face: Face; status: Status }>(
+            listen<{ drive_id: string; source?: Card["source"]; face: Face; status: Status }>(
               "card-status",
               ({ payload }) => {
                 patch(
                   payload.drive_id,
                   { status: payload.status },
                   payload.face,
+                  payload.source,
                 );
               },
             ),
           ),
           register(
-            listen<{ drive_id: string; path?: string; error?: string }>(
+            listen<{ drive_id: string; session_id?: number; source?: Card["source"]; path?: string; error?: string }>(
               "thumb-ready",
               ({ payload }) => {
                 patch(payload.drive_id, {
@@ -176,13 +182,13 @@
                     : undefined,
                   thumbStatus: payload.path ? "ready" : "failed",
                   thumbError: payload.error,
-                });
+                }, undefined, payload.source, payload.session_id);
               },
             ),
           ),
           register(
             getCurrentWebview().onDragDropEvent(({ payload }) => {
-              if (busy || editorMode || artworkCard) return;
+              if (busy || editorMode || artworkCard || reviewLocal) return;
               if (payload.type === "enter" || payload.type === "over")
                 dragging = true;
               else dragging = false;
@@ -323,7 +329,7 @@
   }
 
   async function fill() {
-    if (busy || !summary || !connected) return;
+    if (busy || !summary || !connected || unapprovedImages.length) return;
     busy = true;
     running = true;
     error = "";
@@ -447,7 +453,7 @@
     dpiError = "";
     cards = cards.map((card) => ({
       ...card,
-      dpi: cachedArtworkDpi(card.drive_id),
+      dpi: card.source === "LocalFile" ? null : cachedArtworkDpi(card.drive_id),
     }));
     const ids = [
       ...new Set(
@@ -466,7 +472,7 @@
       if (generation !== dpiGeneration) return;
       cards = cards.map((card) => ({
         ...card,
-        dpi: cachedArtworkDpi(card.drive_id) ?? null,
+        dpi: card.source === "LocalFile" ? null : cachedArtworkDpi(card.drive_id) ?? null,
       }));
     } catch {
       if (generation !== dpiGeneration) return;
@@ -487,7 +493,7 @@
     artworkCard = null;
     // Reuse the gallery's cached image while the order thumbnails refresh.
     invoke<string>("artwork_thumbnail", { driveId: previewId })
-      .then((path) => patch(previewId, { thumb: convertFileSrc(path) }))
+      .then((path) => patch(previewId, { thumb: convertFileSrc(path) }, undefined, "GoogleDrive"))
       .catch(() => {});
     await tick();
     document
@@ -501,14 +507,18 @@
     if (frame !== null) cancelAnimationFrame(frame);
     frame = null;
     pending = [];
+    const sessionChanged = edited.session_id !== summary?.session_id;
     const thumbnails = new Map(
-      cards.map((card) => [card.drive_id, card.thumb]),
+      cards
+        // A new approval may replace the bytes at an unchanged local path.
+        .filter((card) => !sessionChanged || card.source !== "LocalFile")
+        .map((card) => [cardKey(card), card.thumb]),
     );
     summary = edited;
     cards = edited.cards.map((card) => ({
       ...card,
-      thumb: thumbnails.get(card.drive_id),
-      thumbStatus: thumbnails.get(card.drive_id) ? "ready" : "loading",
+      thumb: thumbnails.get(cardKey(card)),
+      thumbStatus: thumbnails.get(cardKey(card)) ? "ready" : "loading",
       status: "pending",
     }));
     void loadDpi();
@@ -534,16 +544,17 @@
     patch(card.drive_id, {
       thumbStatus: "failed",
       thumbError: "The preview could not be displayed.",
-    });
+    }, undefined, card.source ?? "GoogleDrive");
   }
 
   async function retryPreview(card: Card) {
+    if (card.source === "LocalFile") return;
     const order = summary;
     patch(card.drive_id, {
       thumb: undefined,
       thumbStatus: "loading",
       thumbError: undefined,
-    });
+    }, undefined, "GoogleDrive");
     try {
       const path = await invoke<string>("artwork_thumbnail", {
         driveId: card.drive_id,
@@ -552,10 +563,10 @@
         patch(card.drive_id, {
           thumb: convertFileSrc(path),
           thumbStatus: "ready",
-        });
+        }, undefined, "GoogleDrive");
     } catch (e) {
       if (summary === order)
-        patch(card.drive_id, { thumbStatus: "failed", thumbError: String(e) });
+        patch(card.drive_id, { thumbStatus: "failed", thumbError: String(e) }, undefined, "GoogleDrive");
     }
   }
 </script>
@@ -769,7 +780,7 @@
             <button
               class="button primary"
               on:click={fill}
-              disabled={busy || !connected}
+              disabled={busy || !connected || unapprovedImages.length > 0}
               ><Icon name={running ? "clock" : "arrow"} size={17} />{running
                 ? "Autofill in progress"
                 : phase === "done"
@@ -786,6 +797,12 @@
         </div>
       </section>
 
+      {#if localImages.length}
+        <div class="notice" role="status">
+          <p>{unapprovedImages.length ? `${unapprovedImages.length} local artwork image(s) need your approval before autofill.` : "Local artwork approved for this session."}</p>
+          <button class="button secondary small" disabled={busy} on:click={() => (reviewLocal = true)}>Review local images</button>
+        </div>
+      {/if}
       <ProgressPanel
         {cards}
         {phase}
@@ -917,6 +934,8 @@
     on:close={() => (editorMode = null)}
     on:applied={(event) => applyEditedOrder(event.detail)}
   />{/if}
+{#if reviewLocal}<LocalImages {cards} on:close={() => (reviewLocal = false)}
+  on:applied={(event) => applyEditedOrder(event.detail, true)} on:busy={(event) => { localBusy = event.detail; busy = event.detail; }} />{/if}
 {#if closeError}<dialog
     bind:this={closeErrorDialog}
     class="editor-dialog close-error-dialog"

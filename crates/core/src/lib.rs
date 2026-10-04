@@ -3,11 +3,14 @@
 //! any GUI or browser-automation dependencies so it compiles and tests quickly.
 
 pub mod artwork_edit;
-pub mod download;
+pub mod cache;
 pub mod decklist;
-pub mod new_order;
+pub mod download;
 pub mod image_proc;
+pub mod local_files;
+pub mod new_order;
 pub mod order;
+pub mod validation;
 
 pub use download::{DownloadJob, DownloadOutcome};
 pub use image_proc::{downscale, PostProcess};

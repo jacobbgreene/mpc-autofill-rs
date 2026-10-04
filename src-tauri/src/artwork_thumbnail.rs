@@ -24,15 +24,11 @@ impl Default for ArtworkThumbnails {
 }
 
 fn cache_path(directory: &Path, id: &str) -> Result<PathBuf, String> {
-    if id.is_empty()
-        || id.len() > 256
-        || !id
-            .bytes()
-            .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
-    {
-        return Err("Artwork has an invalid Google Drive ID".into());
-    }
-    Ok(directory.join(format!("{id}.jpg")))
+    autofill_core::validation::validate_drive_id(id).map_err(|e| e.to_string())?;
+    Ok(directory.join(format!(
+        "{}.jpg",
+        autofill_core::cache::image_key("drive", id, "thumbnail-640-v2")
+    )))
 }
 
 fn preview_urls(id: &str) -> [String; 3] {
@@ -59,34 +55,26 @@ impl ArtworkThumbnails {
             }
         };
         let _guard = gate.lock().await;
-        if matches!(tokio::fs::metadata(&path).await, Ok(meta) if meta.len() > 0) {
+        if download::cached_thumbnail(&path, 640).await? {
             return Ok(path);
         }
         let _permit = self.permits.acquire().await.map_err(|e| e.to_string())?;
         let client = download::build_client();
-        // Write to a temporary file so a cancelled/crashed download cannot leave
-        // a partial JPEG that a later request mistakes for a cached preview.
-        let temporary = path.with_extension("part");
         let mut errors = Vec::new();
         for url in urls {
-            let _ = tokio::fs::remove_file(&temporary).await;
             let result = tokio::time::timeout(
                 Duration::from_secs(15),
-                download::fetch_thumbnail(&client, url, &temporary, 640),
+                download::fetch_thumbnail(&client, url, &path, 640),
             )
             .await;
             match result {
                 Ok(Ok(())) => {
-                    tokio::fs::rename(&temporary, &path)
-                        .await
-                        .map_err(|e| e.to_string())?;
                     return Ok(path);
                 }
                 Ok(Err(error)) => errors.push(error),
                 Err(_) => errors.push("preview request timed out".into()),
             }
         }
-        let _ = tokio::fs::remove_file(&temporary).await;
         Err(format!(
             "Could not load this artwork preview: {}",
             errors.join("; ")
@@ -105,16 +93,17 @@ pub async fn artwork_thumbnail(
         .path()
         .app_cache_dir()
         .map_err(|e| e.to_string())?
+        .join("images-v2")
         .join("artwork")
         .join("640");
     cache_path(&directory, &drive_id)?;
-    app.asset_protocol_scope()
-        .allow_directory(&directory, false)
-        .map_err(|e| e.to_string())?;
-    shutdown
+    let path = shutdown
         .run(state.fetch(&directory, &drive_id, &preview_urls(&drive_id)))
-        .await
-        .map(|path| path.to_string_lossy().into_owned())
+        .await?;
+    app.asset_protocol_scope()
+        .allow_file(&path)
+        .map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
 }
 
 #[cfg(test)]
@@ -203,7 +192,10 @@ mod tests {
         }
         assert_eq!(
             cache_path(Path::new("/tmp/cache"), "card_1-2").unwrap(),
-            PathBuf::from("/tmp/cache/card_1-2.jpg")
+            Path::new("/tmp/cache").join(format!(
+                "{}.jpg",
+                autofill_core::cache::image_key("drive", "card_1-2", "thumbnail-640-v2")
+            ))
         );
     }
 

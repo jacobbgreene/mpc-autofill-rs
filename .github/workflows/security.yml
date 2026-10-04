@@ -1,0 +1,36 @@
+name: Dependency security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '23 10 * * 1'
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  dependencies:
+    name: Audit locked dependencies
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - name: Audit frontend and development dependencies
+        # Do not omit devDependencies: Vite and its helpers run on developers' machines.
+        run: npm --prefix frontend audit --audit-level=high
+      - name: Install pinned Rust auditor
+        run: cargo install cargo-audit --version 0.22.2 --locked
+      - name: Test the backport integrity gate
+        run: node --test scripts/tests/glib-backport.test.mjs
+      - name: Audit Rust and verified vendored dependencies
+        run: node scripts/audit-rust.mjs
