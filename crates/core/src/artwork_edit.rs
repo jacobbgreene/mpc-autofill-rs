@@ -9,12 +9,7 @@ impl Order {
             "back" => Face::Back,
             _ => return Err(Error::Invalid("choose a front or back image".into())),
         };
-        if selection.drive_id.is_empty()
-            || !selection
-                .drive_id
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-        {
+        if !crate::order::valid_drive_id(&selection.drive_id) {
             return Err(Error::Invalid(
                 "selected artwork has an invalid Google Drive ID".into(),
             ));

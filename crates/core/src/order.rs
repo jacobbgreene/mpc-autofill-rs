@@ -81,10 +81,21 @@ impl Card {
     /// The on-disk file name for this card's downloaded image. Falls back to a
     /// `.png` assumption when the order omits a name, matching the Python tool.
     pub fn file_name(&self) -> String {
-        match &self.name {
-            Some(name) => sanitize_filename::sanitize(name),
-            None => sanitize_filename::sanitize(format!("{}.png", self.drive_id)),
-        }
+        // Names are display metadata, so two different images may legitimately
+        // have the same name. Key the cache by image identity, preserving a
+        // recognized image extension for browser uploads.
+        let extension = self
+            .name
+            .as_deref()
+            .and_then(|name| Path::new(name).extension())
+            .and_then(|extension| extension.to_str())
+            .filter(|extension| {
+                ["png", "jpg", "jpeg", "webp"]
+                    .iter()
+                    .any(|known| extension.eq_ignore_ascii_case(known))
+            })
+            .unwrap_or("png");
+        format!("{}.{}", crate::pid(self.drive_id.as_bytes()), extension)
     }
 }
 
@@ -119,10 +130,15 @@ impl Order {
                 raw.details.quantity
             ))
         })?;
+        validate_quantity(quantity)?;
         let stock = Cardstock::parse(raw.details.stock.trim()).ok_or_else(|| {
             Error::Invalid(format!("unsupported cardstock '{}'", raw.details.stock))
         })?;
-        let foil = raw.details.foil.trim() == "true";
+        let foil = match raw.details.foil.trim() {
+            "true" => true,
+            "" | "false" => false,
+            value => return Err(Error::Invalid(format!("invalid foil value '{value}'"))),
+        };
 
         let details = Details {
             quantity,
@@ -132,13 +148,16 @@ impl Order {
         let cardback_id = raw
             .cardback
             .as_deref()
-            .map(|id| id.trim_matches(|c| c == ' ' || c == '"').to_owned())
+            .map(|id| id.trim().trim_matches('"').trim().to_owned())
             .filter(|id| !id.is_empty());
-        let fronts = merge_cards(raw.fronts.cards);
-        let backs = build_backs(raw.backs.cards, cardback_id.as_deref(), quantity);
+        let fronts = merge_cards(raw.fronts.cards)?;
+        let backs = build_backs(raw.backs.cards, cardback_id.as_deref(), quantity)?;
 
         let order = Order {
-            name: name.to_owned(),
+            name: raw
+                .name
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or_else(|| name.to_owned()),
             details,
             fronts,
             backs,
@@ -149,20 +168,71 @@ impl Order {
     }
 
     pub(crate) fn validate(&self) -> Result<()> {
-        if self.details.quantity == 0 {
-            return Err(Error::Invalid("order has no cards".into()));
-        }
-        if self.details.quantity > PROJECT_MAX_SIZE {
-            return Err(Error::Invalid(format!(
-                "order quantity {} exceeds the maximum project size of {PROJECT_MAX_SIZE}",
-                self.details.quantity
-            )));
-        }
+        validate_quantity(self.details.quantity)?;
         if self.details.stock == Cardstock::P10 && self.details.foil {
             return Err(Error::Invalid("plastic cardstock cannot be foil".into()));
         }
         if self.fronts.is_empty() {
             return Err(Error::Invalid("order has no front images".into()));
+        }
+        if self.cardback_id.as_deref().is_some_and(|id| {
+            !valid_drive_id(id)
+                && !self
+                    .backs
+                    .iter()
+                    .any(|back| back.drive_id == id && back.source == Source::LocalFile)
+        }) {
+            return Err(Error::Invalid(
+                "common cardback has an invalid Google Drive ID".into(),
+            ));
+        }
+        for (_, card) in self.images() {
+            if self
+                .images()
+                .any(|(_, other)| other.drive_id == card.drive_id && other.source != card.source)
+            {
+                return Err(Error::Invalid(
+                    "one image ID cannot refer to both a local file and Google Drive artwork"
+                        .into(),
+                ));
+            }
+        }
+        for (face, cards) in [("front", &self.fronts), ("back", &self.backs)] {
+            let mut covered = BTreeSet::new();
+            for card in cards {
+                if card.drive_id.trim().is_empty()
+                    || (card.source == Source::GoogleDrive && !valid_drive_id(&card.drive_id))
+                {
+                    return Err(Error::Invalid(format!(
+                        "{face} image has an invalid image ID"
+                    )));
+                }
+                if card.slots.is_empty() {
+                    return Err(Error::Invalid(format!(
+                        "{face} image '{}' has no card slots",
+                        card.drive_id
+                    )));
+                }
+                for &slot in &card.slots {
+                    if slot >= self.details.quantity {
+                        return Err(Error::Invalid(format!(
+                            "{face} image has an out-of-range card slot {}",
+                            u64::from(slot) + 1
+                        )));
+                    }
+                    if !covered.insert(slot) {
+                        return Err(Error::Invalid(format!(
+                            "card slot {} has overlapping {face} images",
+                            u64::from(slot) + 1
+                        )));
+                    }
+                }
+            }
+            if face == "front" && covered.len() != self.details.quantity as usize {
+                return Err(Error::Invalid(
+                    "every card slot must have a front image".into(),
+                ));
+            }
         }
         Ok(())
     }
@@ -200,6 +270,7 @@ impl Order {
                 .collect(),
         };
         let raw = RawOrder {
+            name: Some(self.name.clone()),
             details: RawDetails {
                 quantity: self.details.quantity.to_string(),
                 stock: self.details.stock.label().into(),
@@ -218,19 +289,24 @@ impl Order {
 
 /// Merge cards that share a Drive id into one, unioning their slot assignments and
 /// preserving first-seen order.
-fn merge_cards(raw: Vec<RawCard>) -> Vec<Card> {
+fn merge_cards(raw: Vec<RawCard>) -> Result<Vec<Card>> {
     let mut cards: Vec<Card> = Vec::with_capacity(raw.len());
     for card in raw {
-        let slots = parse_slots(&card.slots);
+        let slots = parse_slots(&card.slots)?;
         let source = match card.source_type.as_deref() {
             Some("Local File") => Source::LocalFile,
-            _ => Source::GoogleDrive,
+            None | Some("Google Drive") => Source::GoogleDrive,
+            Some(source) => {
+                return Err(Error::Invalid(format!(
+                    "unsupported image source '{source}'"
+                )))
+            }
         };
-        let drive_id = card.id.trim_matches(|c| c == ' ' || c == '"').to_owned();
+        let drive_id = card.id.trim().trim_matches('"').trim().to_owned();
 
         match cards
             .iter_mut()
-            .find(|existing| existing.drive_id == drive_id)
+            .find(|existing| existing.drive_id == drive_id && existing.source == source)
         {
             Some(existing) => existing.slots.extend(slots),
             None => cards.push(Card {
@@ -242,13 +318,13 @@ fn merge_cards(raw: Vec<RawCard>) -> Vec<Card> {
             }),
         }
     }
-    cards
+    Ok(cards)
 }
 
 /// Build the back face, filling any slots the order leaves uncovered with the
 /// common cardback image.
-fn build_backs(raw: Vec<RawCard>, cardback: Option<&str>, quantity: u32) -> Vec<Card> {
-    let mut backs = merge_cards(raw);
+fn build_backs(raw: Vec<RawCard>, cardback: Option<&str>, quantity: u32) -> Result<Vec<Card>> {
+    let mut backs = merge_cards(raw)?;
 
     let cardback_id = cardback.map(|id| id.trim_matches(|c| c == ' ' || c == '"'));
     if let Some(cardback_id) = cardback_id.filter(|id| !id.is_empty()) {
@@ -273,15 +349,48 @@ fn build_backs(raw: Vec<RawCard>, cardback: Option<&str>, quantity: u32) -> Vec<
             }
         }
     }
-    backs
+    Ok(backs)
 }
 
 /// Parse slot strings such as `"0"`, `"1,2,3"`, or `"[2, 4, 5, 6]"` into a set.
-fn parse_slots(text: &str) -> BTreeSet<u32> {
-    text.trim_matches(|c| c == '[' || c == ']')
-        .split(',')
-        .filter_map(|piece| piece.trim().parse().ok())
+fn parse_slots(text: &str) -> Result<BTreeSet<u32>> {
+    let text = text.trim();
+    let text = if let Some(text) = text.strip_prefix('[') {
+        text.strip_suffix(']')
+            .ok_or_else(|| Error::Invalid("card slots have unmatched brackets".into()))?
+    } else {
+        text
+    };
+    if text.trim().is_empty() {
+        return Ok(BTreeSet::new());
+    }
+    text.split(',')
+        .map(|piece| {
+            piece
+                .trim()
+                .parse()
+                .map_err(|_| Error::Invalid(format!("invalid card slot '{piece}'")))
+        })
         .collect()
+}
+
+pub(crate) fn valid_drive_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+fn validate_quantity(quantity: u32) -> Result<()> {
+    if quantity == 0 {
+        return Err(Error::Invalid("order has no cards".into()));
+    }
+    if quantity > PROJECT_MAX_SIZE {
+        return Err(Error::Invalid(format!(
+            "order quantity {quantity} exceeds the maximum project size of {PROJECT_MAX_SIZE}"
+        )));
+    }
+    Ok(())
 }
 
 // region raw XML shapes
@@ -289,6 +398,8 @@ fn parse_slots(text: &str) -> BTreeSet<u32> {
 #[derive(Deserialize, serde::Serialize)]
 #[serde(rename = "order")]
 struct RawOrder {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
     details: RawDetails,
     #[serde(default)]
     fronts: RawFace,
@@ -389,18 +500,141 @@ mod tests {
 
     #[test]
     fn parses_slot_range_syntax() {
-        assert_eq!(parse_slots("[2, 4, 5, 6]"), BTreeSet::from([2, 4, 5, 6]));
-        assert_eq!(parse_slots("0"), BTreeSet::from([0]));
-        assert_eq!(parse_slots(""), BTreeSet::new());
+        assert_eq!(
+            parse_slots("[2, 4, 5, 6]").unwrap(),
+            BTreeSet::from([2, 4, 5, 6])
+        );
+        assert_eq!(parse_slots("0").unwrap(), BTreeSet::from([0]));
+        assert_eq!(parse_slots("").unwrap(), BTreeSet::new());
     }
 
     #[test]
     fn rejects_oversized_orders() {
-        let xml = SAMPLE.replace("<quantity>3</quantity>", "<quantity>700</quantity>");
+        for quantity in [700, u32::MAX] {
+            // The common back must never allocate slot assignments before this
+            // limit is checked, even when an imported quantity is enormous.
+            let xml = SAMPLE.replace(
+                "<quantity>3</quantity>",
+                &format!("<quantity>{quantity}</quantity>"),
+            );
+            assert!(matches!(
+                Order::from_xml("big", &xml),
+                Err(Error::Invalid(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn rejects_malformed_missing_overlapping_and_out_of_range_slots() {
+        for slots in [
+            "nope",
+            "0,broken",
+            "-1",
+            "[0",
+            "0,",
+            "3",
+            "4294967295",
+            "1",
+            "",
+        ] {
+            let xml = SAMPLE.replacen("<slots>0</slots>", &format!("<slots>{slots}</slots>"), 1);
+            assert!(
+                matches!(Order::from_xml("bad", &xml), Err(Error::Invalid(_))),
+                "{slots}"
+            );
+        }
+        let xml = SAMPLE.replace(
+            "</backs>",
+            "<card><id>another_back</id><slots>0</slots></card></backs>",
+        );
         assert!(matches!(
-            Order::from_xml("big", &xml),
+            Order::from_xml("overlap", &xml),
             Err(Error::Invalid(_))
         ));
+    }
+
+    #[test]
+    fn rejects_invalid_image_ids_sources_and_foil_values() {
+        for xml in [
+            SAMPLE.replace("<id>front_b</id>", "<id>bad&amp;id</id>"),
+            SAMPLE.replace("<id>front_b</id>", "<id> </id>"),
+            SAMPLE.replace(
+                "<id>front_b</id>",
+                "<id>front_b</id><sourceType>Unknown</sourceType>",
+            ),
+            SAMPLE.replace("<foil>false</foil>", "<foil>yes</foil>"),
+        ] {
+            assert!(matches!(
+                Order::from_xml("invalid", &xml),
+                Err(Error::Invalid(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn local_common_backs_retain_their_source_and_fill_missing_slots() {
+        let xml = SAMPLE
+            .replace(
+                "<id>back_x</id>",
+                "<id>/tmp/back.png</id><sourceType>Local File</sourceType>",
+            )
+            .replace(
+                "<cardback>common_back</cardback>",
+                "<cardback>/tmp/back.png</cardback>",
+            );
+        let order = Order::from_xml("local", &xml).unwrap();
+        assert_eq!(order.backs.len(), 1);
+        assert_eq!(order.backs[0].source, Source::LocalFile);
+        assert_eq!(order.backs[0].slots, BTreeSet::from([0, 1, 2]));
+        assert_eq!(
+            Order::from_xml("local", &order.to_xml().unwrap()).unwrap(),
+            order
+        );
+    }
+
+    #[test]
+    fn conflicting_sources_cannot_share_a_download_identity() {
+        let xml = SAMPLE.replace(
+            "<id>back_x</id>",
+            "<id>front_a</id><sourceType>Local File</sourceType>",
+        );
+        assert!(matches!(
+            Order::from_xml("conflict", &xml),
+            Err(Error::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn saved_names_survive_sanitized_file_names_and_xml_escaping() {
+        let mut order = Order::from_xml("legacy filename", SAMPLE).unwrap();
+        assert_eq!(order.name, "legacy filename");
+        order.name = "My/Deck & <Friends>".into();
+        assert_eq!(
+            Order::from_xml("My_Deck & Friends", &order.to_xml().unwrap())
+                .unwrap()
+                .name,
+            order.name
+        );
+    }
+
+    #[test]
+    fn cache_file_names_distinguish_duplicate_and_sanitized_names() {
+        let order = Order::from_xml("sample", SAMPLE).unwrap();
+        let mut first = order.fronts[0].clone();
+        let mut second = order.fronts[1].clone();
+        first.name = Some("Same.png".into());
+        second.name = first.name.clone();
+        assert_ne!(first.file_name(), second.file_name());
+        first.name = Some("Same?.png".into());
+        assert_ne!(first.file_name(), second.file_name());
+        first.name = Some(format!("{}.png", "界".repeat(200)));
+        assert!(first.file_name().len() <= 255);
+        assert_eq!(
+            std::path::Path::new(&first.file_name())
+                .components()
+                .count(),
+            1
+        );
     }
 
     #[test]

@@ -12,6 +12,7 @@
     foil: boolean;
     modified: number;
     preview_id: string | null;
+    draft: boolean;
   };
   type Listing = { decks: SavedDeck[]; folder: string; warning: string | null };
 
@@ -91,7 +92,7 @@
         class="button secondary small"
         {disabled}
         on:click={() => dispatch("open", false)}
-        ><Icon name="folder" size={16} />Open order</button
+        ><Icon name="folder" size={16} />Open deck…</button
       >
       <button
         class="button primary small"
@@ -152,7 +153,7 @@
             class="saved-deck"
             {disabled}
             on:click={() => dispatch("select", deck.path)}
-            aria-label={`Open ${deck.name}, ${deck.quantity} cards`}
+            aria-label={`Open ${deck.name}, ${deck.draft ? "saved draft" : `${deck.quantity} cards`}`}
           >
             <span class="saved-deck-art">
               {#if deck.preview_id}<ArtworkThumbnail
@@ -163,8 +164,9 @@
             </span>
             <span class="saved-deck-details">
               <strong>{deck.name}</strong>
+              {#if deck.draft}<span class="draft-badge">Unfinished draft</span>{/if}
               <span class="saved-deck-count"
-                >{deck.quantity} card{deck.quantity === 1 ? "" : "s"}{deck.foil
+                >{deck.quantity ? `${deck.quantity} card${deck.quantity === 1 ? "" : "s"}` : "Card count pending"}{deck.foil
                   ? " · Foil"
                   : ""}</span
               >
@@ -172,7 +174,7 @@
               <span class="saved-deck-date">Saved {date(deck.modified)}</span>
               <span class="saved-deck-path" title={deck.path}>{deck.path}</span>
               <span class="saved-deck-open"
-                >Open deck <Icon name="arrow" size={14} /></span
+                >{deck.draft ? "Continue draft" : "Open deck"} <Icon name="arrow" size={14} /></span
               >
             </span>
           </button>
@@ -192,7 +194,7 @@
     <div class="no-results saved-decks-empty">
       <Icon name="folder" size={32} />
       <h3>No saved decks available yet</h3>
-      <p>Save a deck, or open an existing XML order to add it here.</p>
+      <p>Save a draft or deck, or open an existing XML order to add it here.</p>
     </div>
   {/if}
   {#if !loading || decks.length}

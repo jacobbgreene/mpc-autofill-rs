@@ -1,3 +1,5 @@
+import type { ArtworkChoice } from "./artwork";
+
 export type Face = "front" | "back";
 export type Status =
   | "pending"
@@ -29,6 +31,8 @@ export type OrderSummary = {
   cards: Omit<Card, "status">[];
   path: string;
   dirty: boolean;
+  draft: DeckDraft | null;
+  draft_error: string | null;
 };
 
 export const statusLabels: Record<Status, string> = {
@@ -118,3 +122,12 @@ export function placementCounts(cards: Card[], face?: Face) {
     attention: relevant.filter(needsAttention).length,
   };
 }
+export type DeckDraft = {
+  version: 1;
+  text: string;
+  name: string;
+  stock: string;
+  foil: boolean;
+  choices: Record<string, ArtworkChoice>;
+  common_back: ArtworkChoice | null;
+};

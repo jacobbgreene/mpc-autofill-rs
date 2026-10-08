@@ -52,7 +52,7 @@ installation; the Linux AppImage is extracted and started on a private display.
 These checks do not exercise a signed-in MakePlayingCards upload.
 
 Push a tag matching the versions in `Cargo.toml`, `src-tauri/tauri.conf.json`, and
-`frontend/package.json` (for example, `v0.1.0`). Both platforms must pass before
+`frontend/package.json` (for example, `v0.1.3`). Both platforms must pass before
 the workflow creates a draft preview release with installers and SHA-256
 checksums. Review the assets and publish the draft to share it. A manual workflow
 run on a branch builds downloadable workflow artifacts without creating a release.
@@ -158,13 +158,24 @@ The suggested deck name is a placeholder that disappears as you type. Leave it
 empty to use the imported filename (or **New deck** for a pasted list).
 Explicit double-faced pairs keep their own backs. A common back is only required
 for cards without an explicit reverse.
+In the card-back gallery, use **☆ Favorite** to save a back for future decks.
+The most recently favorited back is selected by default when creating a deck;
+you can still choose another back before creating it.
 
 The appearance selector in the top bar offers **Light**, **Dark**, and **System**.
 Your choice is remembered between sessions; **System** follows your device theme.
 
-**Create deck** opens the completed draft in the card library. The first **Save**
-asks where to write its XML order; the imported text file stays unchanged. The
-**Open order** picker also accepts `.txt` files when another order is loaded.
+**Save draft** is available throughout import, including when the decklist has a
+syntax error, artwork is missing, or no common back has been chosen. It saves the
+raw list, print settings, and selected artwork to a `.mpcdeck` file and opens a
+draft review screen. Drafts appear in **Saved decks**; open one and select
+**Continue import** to make fixes later. Drafts cannot start autofill until you
+finish importing them. **Create deck** opens a completed order in the card
+library. If you typed a deck name, its XML is saved automatically in Saved
+decks, with a numbered filename when the name is already in use. Otherwise,
+the first **Save** asks where to write its XML. The saved draft remains
+available separately, and the imported text file stays unchanged. The welcome
+screen can open `.xml`, `.txt`, and `.mpcdeck` files.
 
 Open or drop an order XML to browse its cards. Search by name, show all cards,
 backs, or images needing attention, and click a card for a larger preview.
@@ -181,7 +192,8 @@ Common-back failures still appear under
 quantities, slot order, and front/back pairings. Save the order to keep the new
 artwork.
 Autofill shows each stage and asks you to sign in in Chrome when necessary.
-Completion reports skipped images so you can check them before placing an order.
+If any image cannot be downloaded, autofill stops before opening the project
+editor and shows which images need attention.
 
 **Edit list** opens the current order as text. **Replace deck** starts a new list
 inside the same order. Both accept pasted text or an imported `.txt` file:
@@ -189,16 +201,21 @@ inside the same order. Both accept pasted text or an imported `.txt` file:
 ```text
 4 Island
 1 Lightning Bolt
-1 Delver of Secrets | Insectile Aberration
+1 Delver of Secrets // Insectile Aberration
 ```
 
 Use one card per line with an optional quantity (`4` or `4x`). Blank lines and
 lines beginning with `#` or `//` are ignored, along with category headings such
-as `COMMANDER (1)` and `CREATURES (20)`. `Front name | Back name` specifies
+as `COMMANDER (1)` and `CREATURES (20)`. `Front name // Back name` or
+`Front name | Back name` specifies
 a custom reverse. Existing artwork and back pairings are retained; new names
 must have artwork chosen from the MPC Autofill search results before changes can
 be applied. Use the full artwork name or image ID to distinguish variants with
 the same card name. Each order supports up to 612 cards.
+From the deck viewer, use **Paste replacement decklist** or **Import replacement
+.txt** to carry matching artwork into the replacement. Adding `// Back name` to
+a matching card keeps its front artwork and lets you choose the new reverse.
+Use **New deck** for a separate deck, or **Open deck…** for an existing order.
 
 Applying a list updates the loaded order; **Save** writes it back as XML, and
 **Save as…** writes a separate XML. Stock, foil, and the common cardback are

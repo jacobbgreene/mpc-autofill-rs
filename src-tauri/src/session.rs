@@ -15,6 +15,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, oneshot};
 
+use crate::draft::{self, DeckDraft};
 use crate::files::write_atomic;
 use crate::saved_decks::SavedDecks;
 
@@ -36,6 +37,7 @@ pub enum Command {
         options: NewOrderOptions,
         text: String,
         selections: Vec<ArtworkSelection>,
+        save_named: bool,
         reply: Reply<OrderSummary>,
     },
     GetDecklist {
@@ -60,6 +62,11 @@ pub enum Command {
         path: Option<PathBuf>,
         reply: Reply<OrderSummary>,
     },
+    SaveDraft {
+        draft: DeckDraft,
+        path: PathBuf,
+        reply: Reply<OrderSummary>,
+    },
     Download {
         reply: Reply<()>,
     },
@@ -80,6 +87,8 @@ pub struct OrderSummary {
     pub cards: Vec<CardView>,
     pub path: String,
     pub dirty: bool,
+    pub draft: Option<DeckDraft>,
+    pub draft_error: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -136,9 +145,14 @@ pub async fn run(mut inbox: mpsc::Receiver<Command>, app: AppHandle) {
                 options,
                 text,
                 selections,
+                save_named,
                 reply,
             } => {
-                let _ = reply.send(session.create_order(&options, &text, &selections));
+                let _ = reply.send(
+                    session
+                        .create_order(&options, &text, &selections, save_named)
+                        .await,
+                );
             }
             Command::GetDecklist { reply } => {
                 let _ = reply.send(
@@ -183,6 +197,9 @@ pub async fn run(mut inbox: mpsc::Receiver<Command>, app: AppHandle) {
             Command::SaveOrder { path, reply } => {
                 let _ = reply.send(session.save_order(path).await);
             }
+            Command::SaveDraft { draft, path, reply } => {
+                let _ = reply.send(session.save_draft(draft, path).await);
+            }
             Command::Download { reply } => {
                 let _ = reply.send(session.download().await);
             }
@@ -201,6 +218,7 @@ pub async fn run(mut inbox: mpsc::Receiver<Command>, app: AppHandle) {
 struct Session {
     app: AppHandle,
     order: Option<Order>,
+    draft: Option<DeckDraft>,
     cards_dir: PathBuf,
     /// Drive id -> path of a successfully fetched image, ready to upload.
     downloaded: HashMap<String, PathBuf>,
@@ -215,6 +233,7 @@ impl Session {
         Session {
             app,
             order: None,
+            draft: None,
             cards_dir: PathBuf::new(),
             downloaded: HashMap::new(),
             driver: None,
@@ -225,6 +244,21 @@ impl Session {
     }
 
     async fn load_order(&mut self, path: PathBuf) -> Result<OrderSummary, String> {
+        if draft::is_draft(&path) {
+            let loaded = tokio::task::spawn_blocking({
+                let path = path.clone();
+                move || draft::read(&path)
+            })
+            .await
+            .map_err(|e| e.to_string())??;
+            self.order = None;
+            self.draft = Some(loaded);
+            self.order_path = path;
+            self.dirty = false;
+            self.downloaded.clear();
+            self.remember_order().await;
+            return self.summary();
+        }
         let order = Order::from_file(&path).await.map_err(|e| e.to_string())?;
 
         // Images land in a `cards/` folder beside the order file. Authorize that
@@ -241,6 +275,7 @@ impl Session {
         self.order_path = path;
         self.dirty = false;
         self.order = Some(order);
+        self.draft = None;
         self.remember_order().await;
         self.summary()
     }
@@ -261,6 +296,20 @@ impl Session {
     }
 
     fn summary(&self) -> Result<OrderSummary, String> {
+        if let Some(draft) = &self.draft {
+            let (quantity, draft_error) = draft.preview();
+            return Ok(OrderSummary {
+                name: draft.name.clone(),
+                quantity,
+                stock: draft.stock.label().to_owned(),
+                foil: draft.foil,
+                cards: Vec::new(),
+                path: self.order_path.to_string_lossy().into_owned(),
+                dirty: self.dirty,
+                draft: Some(draft.clone()),
+                draft_error,
+            });
+        }
         let order = self.order.as_ref().ok_or("no order loaded")?;
         let cardback_id = order.cardback_id.as_deref();
         let cards = order
@@ -282,16 +331,19 @@ impl Session {
             cards,
             path: self.order_path.to_string_lossy().into_owned(),
             dirty: self.dirty,
+            draft: None,
+            draft_error: None,
         };
 
         Ok(summary)
     }
 
-    fn create_order(
+    async fn create_order(
         &mut self,
         options: &NewOrderOptions,
         text: &str,
         selections: &[ArtworkSelection],
+        save_named: bool,
     ) -> Result<OrderSummary, String> {
         // Resolve and validate the complete draft before replacing a loaded order.
         let order = options
@@ -313,11 +365,20 @@ impl Session {
             .asset_protocol_scope()
             .allow_directory(&cards_dir, true)
             .map_err(|e| e.to_string())?;
+        let path = if save_named {
+            self.app
+                .state::<SavedDecks>()
+                .save_new_order(&order)
+                .await?
+        } else {
+            PathBuf::new()
+        };
         self.cards_dir = cards_dir;
-        self.order_path = PathBuf::new();
+        self.order_path = path;
         self.downloaded.clear();
-        self.dirty = true;
+        self.dirty = !save_named;
         self.order = Some(order);
+        self.draft = None;
         self.summary()
     }
 
@@ -376,22 +437,36 @@ impl Session {
         tokio::task::spawn_blocking(move || write_atomic(&dest, &xml))
             .await
             .map_err(|e| e.to_string())??;
-        if let Some(order) = self.order.as_mut() {
-            order.name = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("Project")
-                .into();
-        }
         self.order_path = path;
         self.dirty = false;
         self.remember_order().await;
         self.summary()
     }
 
+    async fn save_draft(
+        &mut self,
+        draft: DeckDraft,
+        path: PathBuf,
+    ) -> Result<OrderSummary, String> {
+        if !draft::is_draft(&path) {
+            return Err("save the draft with an .mpcdeck extension".into());
+        }
+        let encoded = draft::encode(&draft)?;
+        let dest = path.clone();
+        tokio::task::spawn_blocking(move || write_atomic(&dest, &encoded))
+            .await
+            .map_err(|e| e.to_string())??;
+        self.order = None;
+        self.draft = Some(draft);
+        self.order_path = path;
+        self.dirty = false;
+        self.downloaded.clear();
+        self.remember_order().await;
+        self.summary()
+    }
+
     async fn download(&mut self) -> Result<(), String> {
         let order = self.order.as_ref().ok_or("no order loaded")?;
-        let client = download::build_client();
 
         // Own each job's id so it can move into a download task while the order
         // stays put for the fill phase.
@@ -404,33 +479,18 @@ impl Session {
             })
             .collect();
 
-        let post = self.post;
-        let client_ref = &client;
-        let mut outcomes = stream::iter(jobs)
-            .map(|job| async move { download::download_one(job, client_ref, post).await })
-            .buffer_unordered(DOWNLOAD_CONCURRENCY);
-
-        while let Some(DownloadOutcome { drive_id, result }) = outcomes.next().await {
-            let event = match result {
-                Ok(full) => {
-                    // `drive_id` has two owners here — the event and the map — so
-                    // one clone is unavoidable; everything else moves.
-                    let event = DownloadEvent {
-                        drive_id: drive_id.clone(),
-                        ok: true,
-                        error: None,
-                    };
-                    self.downloaded.insert(drive_id, full);
-                    event
-                }
-                Err(error) => DownloadEvent {
-                    drive_id,
-                    ok: false,
-                    error: Some(error),
+        self.downloaded.clear();
+        self.downloaded = download_images(jobs, self.post, |outcome| {
+            let _ = self.app.emit(
+                "download-progress",
+                DownloadEvent {
+                    drive_id: outcome.drive_id.clone(),
+                    ok: outcome.result.is_ok(),
+                    error: outcome.result.as_ref().err().cloned(),
                 },
-            };
-            let _ = self.app.emit("download-progress", event);
-        }
+            );
+        })
+        .await?;
         Ok(())
     }
 
@@ -514,8 +574,7 @@ impl Session {
     ) -> Result<(), String> {
         for (_, card) in order.images().filter(|(f, _)| *f == face) {
             let Some(path) = self.downloaded.get(&card.drive_id) else {
-                self.emit_card(&card.drive_id, face, "skipped");
-                continue;
+                return Err(format!("image {} is not ready to upload", card.drive_id));
             };
             self.emit_card(&card.drive_id, face, "uploading");
             let slots = effective_slots(face, back_mode, &card.slots);
@@ -548,6 +607,7 @@ impl Session {
         let jobs: Vec<ThumbJob> = order
             .images()
             .filter(|(_, card)| card.source == Source::GoogleDrive)
+            .filter(|(_, card)| valid_thumbnail_id(&card.drive_id))
             .filter(|(_, card)| seen.insert(card.drive_id.as_str()))
             .map(|(_, card)| ThumbJob {
                 url: format!(
@@ -577,6 +637,49 @@ impl Session {
             },
         );
     }
+}
+
+/// Finish every download so the UI can show all failures, then stop the fill
+/// unless all images are available. A retry reuses the files already cached.
+async fn download_images(
+    jobs: Vec<DownloadJob>,
+    post: Option<PostProcess>,
+    mut on_outcome: impl FnMut(&DownloadOutcome),
+) -> Result<HashMap<String, PathBuf>, String> {
+    let client = download::build_client();
+    let client_ref = &client;
+    let mut outcomes = stream::iter(jobs)
+        .map(|job| async move { download::download_one(job, client_ref, post).await })
+        .buffer_unordered(DOWNLOAD_CONCURRENCY);
+    let mut downloaded = HashMap::new();
+    let mut failed = 0;
+    let mut first_error = None;
+    while let Some(outcome) = outcomes.next().await {
+        on_outcome(&outcome);
+        match outcome.result {
+            Ok(path) => {
+                downloaded.insert(outcome.drive_id, path);
+            }
+            Err(error) => {
+                failed += 1;
+                first_error.get_or_insert(error);
+            }
+        }
+    }
+    match first_error {
+        Some(error) => Err(format!(
+            "{failed} image download(s) failed. Resolve the image errors and retry autofill. {error}"
+        )),
+        None => Ok(downloaded),
+    }
+}
+
+fn valid_thumbnail_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 256
+        && id
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
 }
 
 /// A common back can use the editor's Same mode only when it is the sole back
@@ -614,6 +717,53 @@ fn effective_slots(
     }
 }
 
+fn face_name(face: Face) -> &'static str {
+    match face {
+        Face::Front => "front",
+        Face::Back => "back",
+    }
+}
+
+/// How many thumbnails to fetch at once. They're small, so we can be generous.
+const THUMBNAIL_CONCURRENCY: usize = 12;
+/// Longest edge of a cached UI thumbnail.
+const THUMBNAIL_EDGE: u32 = 640;
+
+struct ThumbJob {
+    drive_id: String,
+    url: String,
+    path: PathBuf,
+}
+
+/// Fetch each card's Drive thumbnail in the backend (which has working TLS),
+/// re-encode it small, cache it to disk, and tell the UI its local path. The UI
+/// then loads it via the asset protocol — no webview networking involved.
+async fn fetch_thumbnails(jobs: Vec<ThumbJob>, app: AppHandle) {
+    let client = download::build_client();
+    let client_ref = &client;
+
+    let mut results = stream::iter(jobs)
+        .map(|job| async move {
+            let ok = download::fetch_thumbnail(client_ref, &job.url, &job.path, THUMBNAIL_EDGE)
+                .await
+                .is_ok();
+            (job.drive_id, if ok { Some(job.path) } else { None })
+        })
+        .buffer_unordered(THUMBNAIL_CONCURRENCY);
+
+    while let Some((drive_id, path)) = results.next().await {
+        if let Some(path) = path {
+            let _ = app.emit(
+                "thumb-ready",
+                ThumbReadyEvent {
+                    drive_id,
+                    path: path.to_string_lossy().into_owned(),
+                },
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -626,6 +776,57 @@ mod tests {
             slots: slots.into_iter().collect(),
             name: None,
             query: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_images_fail_the_download_phase_after_reporting_every_result() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("mpc-download-{}-{stamp}", std::process::id()));
+        std::fs::create_dir(&dir).unwrap();
+        let existing = dir.join("existing.png");
+        std::fs::write(&existing, "image").unwrap();
+        let jobs = |include_missing: bool| {
+            [
+                Some(&existing),
+                include_missing.then_some(&dir.join("missing.png")),
+            ]
+            .into_iter()
+            .flatten()
+            .map(|path| DownloadJob {
+                drive_id: path.to_string_lossy().into_owned(),
+                source: Source::LocalFile,
+                dest: PathBuf::new(),
+            })
+            .collect()
+        };
+        let mut outcomes = Vec::new();
+        let error = download_images(jobs(true), None, |outcome| {
+            outcomes.push(outcome.result.is_ok())
+        })
+        .await
+        .unwrap_err();
+        outcomes.sort();
+        assert_eq!(outcomes, [false, true]);
+        assert!(error.contains("1 image download(s) failed"));
+        assert_eq!(
+            download_images(jobs(false), None, |_| {})
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn order_thumbnails_require_safe_drive_ids() {
+        assert!(valid_thumbnail_id("drive_123-id"));
+        for id in ["", "../../escape", "/tmp/image", "id?other=value"] {
+            assert!(!valid_thumbnail_id(id));
         }
     }
 
@@ -690,52 +891,5 @@ mod tests {
         std::fs::remove_file(path).unwrap();
         std::fs::remove_dir(blocked).unwrap();
         std::fs::remove_dir(dir).unwrap();
-    }
-}
-
-fn face_name(face: Face) -> &'static str {
-    match face {
-        Face::Front => "front",
-        Face::Back => "back",
-    }
-}
-
-/// How many thumbnails to fetch at once. They're small, so we can be generous.
-const THUMBNAIL_CONCURRENCY: usize = 12;
-/// Longest edge of a cached UI thumbnail.
-const THUMBNAIL_EDGE: u32 = 640;
-
-struct ThumbJob {
-    drive_id: String,
-    url: String,
-    path: PathBuf,
-}
-
-/// Fetch each card's Drive thumbnail in the backend (which has working TLS),
-/// re-encode it small, cache it to disk, and tell the UI its local path. The UI
-/// then loads it via the asset protocol — no webview networking involved.
-async fn fetch_thumbnails(jobs: Vec<ThumbJob>, app: AppHandle) {
-    let client = download::build_client();
-    let client_ref = &client;
-
-    let mut results = stream::iter(jobs)
-        .map(|job| async move {
-            let ok = download::fetch_thumbnail(client_ref, &job.url, &job.path, THUMBNAIL_EDGE)
-                .await
-                .is_ok();
-            (job.drive_id, if ok { Some(job.path) } else { None })
-        })
-        .buffer_unordered(THUMBNAIL_CONCURRENCY);
-
-    while let Some((drive_id, path)) = results.next().await {
-        if let Some(path) = path {
-            let _ = app.emit(
-                "thumb-ready",
-                ThumbReadyEvent {
-                    drive_id,
-                    path: path.to_string_lossy().into_owned(),
-                },
-            );
-        }
     }
 }

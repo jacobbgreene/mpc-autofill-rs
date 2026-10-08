@@ -70,7 +70,9 @@ impl Driver {
             .map_err(Error::Site)
             .map_err(|error| Error::stage("startup/browser-launch", error))?;
 
-        reap_orphaned_automation_browsers().await;
+        reap_orphaned_automation_browsers()
+            .await
+            .map_err(|error| Error::stage("startup/browser-launch", error))?;
 
         let (browser, mut handler) = Browser::launch(config)
             .await
@@ -976,6 +978,140 @@ fn is_context_turnover_error(error: &Error) -> bool {
     is_context_not_found_error(error) || is_context_destroyed_error(error)
 }
 
+/// chromiumoxide always launches Chrome with a fixed
+/// `--user-data-dir=$TMP/chromiumoxide-runner` (its default when no data dir is
+/// configured). A Chrome orphaned by a killed or crashed run keeps that profile
+/// and makes every subsequent launch fail — the new process forwards to the
+/// live one and exits, surfacing as a launch error or the 20s launch timeout.
+/// `Driver::launch` only runs when this session holds no live driver. Another
+/// app instance may still own the shared profile, so leave its browser alone.
+/// Linux-only and best-effort; other platforms keep the pre-existing behavior.
+#[cfg(target_os = "linux")]
+async fn reap_orphaned_automation_browsers() -> Result<()> {
+    let profile = std::env::temp_dir().join("chromiumoxide-runner");
+    let needle = format!("--user-data-dir={}", profile.display()).into_bytes();
+
+    // chromiumoxide's default launch always includes this flag too; requiring
+    // both keeps stray tools that merely mention the profile path from matching.
+    let debugger_flag: &[u8] = b"--remote-debugging-port";
+    let mut pids: Vec<libc::pid_t> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir("/proc") {
+        for entry in entries.flatten() {
+            let Ok(pid) = entry.file_name().to_string_lossy().parse::<libc::pid_t>() else {
+                continue;
+            };
+            if pid == std::process::id() as libc::pid_t {
+                continue;
+            }
+            let Ok(cmdline) = std::fs::read(entry.path().join("cmdline")) else {
+                continue;
+            };
+            // Substring search, not argv matching: NixOS wrappers repack the
+            // whole command line into argv[0], and Chrome's child processes
+            // inherit the flags, so this catches the entire tree of any
+            // browser on the automation profile.
+            if contains_subslice(&cmdline, &needle) && contains_subslice(&cmdline, debugger_flag) {
+                pids.push(pid);
+            }
+        }
+    }
+    if pids.is_empty() {
+        return Ok(());
+    }
+
+    let app_comm = std::fs::read_to_string("/proc/self/comm").unwrap_or_default();
+    if !app_comm.trim().is_empty()
+        && pids
+            .iter()
+            .any(|&pid| has_live_app_ancestor(pid, app_comm.trim()))
+    {
+        return Err(Error::Site(
+            "another MPC Autofill instance is using the automation browser profile".into(),
+        ));
+    }
+
+    tracing::warn!("reaping orphaned automation browser process(es): {pids:?}");
+    for &pid in &pids {
+        unsafe { libc::kill(pid, libc::SIGTERM) };
+    }
+    // SIGTERM lets Chrome shut down cleanly and release its profile lock;
+    // escalate to SIGKILL only for stragglers.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        pids.retain(|&pid| unsafe { libc::kill(pid, 0) } == 0);
+        if pids.is_empty() || Instant::now() >= deadline {
+            break;
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+    for &pid in &pids {
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn has_live_app_ancestor(pid: libc::pid_t, app_comm: &str) -> bool {
+    let mut current = pid;
+    for _ in 0..32 {
+        let Ok(status) = std::fs::read_to_string(format!("/proc/{current}/status")) else {
+            return false;
+        };
+        let Some(parent) = status.lines().find_map(|line| {
+            line.strip_prefix("PPid:")?
+                .trim()
+                .parse::<libc::pid_t>()
+                .ok()
+        }) else {
+            return false;
+        };
+        if parent <= 1 || parent == current {
+            return false;
+        }
+        let Ok(comm) = std::fs::read_to_string(format!("/proc/{parent}/comm")) else {
+            return false;
+        };
+        if comm.trim() == app_comm {
+            return true;
+        }
+        current = parent;
+    }
+    false
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn reap_orphaned_automation_browsers() -> Result<()> {
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
+    !needle.is_empty()
+        && haystack.len() >= needle.len()
+        && haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
+}
+
+/// Auto-accept any `alert`/`confirm`/`beforeunload` dialog the editor raises;
+/// an unhandled dialog blocks the page's JS and hangs `evaluate`.
+async fn auto_accept_dialogs(page: &Page) -> Result<()> {
+    let mut dialogs = page
+        .event_listener::<EventJavascriptDialogOpening>()
+        .await?;
+    // The accept loop runs concurrently with the driver's own use of the page, so
+    // it needs its own handle; a chromiumoxide `Page` clone is a cheap refcount.
+    let page = page.clone();
+    tokio::spawn(async move {
+        while dialogs.next().await.is_some() {
+            if let Ok(params) = HandleJavaScriptDialogParams::builder().accept(true).build() {
+                let _ = page.execute(params).await;
+            }
+        }
+    });
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1229,7 +1365,10 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert_eq!(error.to_string(), "front-text/wait-ready: Request timed out.");
+        assert_eq!(
+            error.to_string(),
+            "front-text/wait-ready: Request timed out."
+        );
     }
 
     #[tokio::test]
@@ -1601,7 +1740,7 @@ mod tests {
         )
         .await;
 
-        assert_eq!(result.unwrap(), true);
+        assert!(result.unwrap());
         assert!(probes.load(std::sync::atomic::Ordering::SeqCst) > 0);
         assert_eq!(reloads.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
@@ -1632,94 +1771,4 @@ mod tests {
         )));
         assert!(!is_context_turnover_error(&Error::Cdp(CdpError::Timeout)));
     }
-}
-
-/// chromiumoxide always launches Chrome with a fixed
-/// `--user-data-dir=$TMP/chromiumoxide-runner` (its default when no data dir is
-/// configured). A Chrome orphaned by a killed or crashed run keeps that profile
-/// and makes every subsequent launch fail — the new process forwards to the
-/// live one and exits, surfacing as a launch error or the 20s launch timeout.
-/// `Driver::launch` only runs when this session holds no live driver, so any
-/// process on that profile belongs to a dead instance and is safe to reap.
-/// Linux-only and best-effort; other platforms keep the pre-existing behavior.
-#[cfg(target_os = "linux")]
-async fn reap_orphaned_automation_browsers() {
-    let profile = std::env::temp_dir().join("chromiumoxide-runner");
-    let needle = format!("--user-data-dir={}", profile.display()).into_bytes();
-
-    // chromiumoxide's default launch always includes this flag too; requiring
-    // both keeps stray tools that merely mention the profile path from matching.
-    let debugger_flag: &[u8] = b"--remote-debugging-port";
-    let mut pids: Vec<libc::pid_t> = Vec::new();
-    if let Ok(entries) = std::fs::read_dir("/proc") {
-        for entry in entries.flatten() {
-            let Ok(pid) = entry.file_name().to_string_lossy().parse::<libc::pid_t>() else {
-                continue;
-            };
-            if pid == std::process::id() as libc::pid_t {
-                continue;
-            }
-            let Ok(cmdline) = std::fs::read(entry.path().join("cmdline")) else {
-                continue;
-            };
-            // Substring search, not argv matching: NixOS wrappers repack the
-            // whole command line into argv[0], and Chrome's child processes
-            // inherit the flags, so this catches the entire tree of any
-            // browser on the automation profile.
-            if contains_subslice(&cmdline, &needle) && contains_subslice(&cmdline, debugger_flag)
-            {
-                pids.push(pid);
-            }
-        }
-    }
-    if pids.is_empty() {
-        return;
-    }
-
-    tracing::warn!("reaping orphaned automation browser process(es): {pids:?}");
-    for &pid in &pids {
-        unsafe { libc::kill(pid, libc::SIGTERM) };
-    }
-    // SIGTERM lets Chrome shut down cleanly and release its profile lock;
-    // escalate to SIGKILL only for stragglers.
-    let deadline = Instant::now() + Duration::from_secs(2);
-    loop {
-        pids.retain(|&pid| unsafe { libc::kill(pid, 0) } == 0);
-        if pids.is_empty() || Instant::now() >= deadline {
-            break;
-        }
-        sleep(Duration::from_millis(100)).await;
-    }
-    for &pid in &pids {
-        unsafe { libc::kill(pid, libc::SIGKILL) };
-    }
-}
-
-#[cfg(not(target_os = "linux"))]
-async fn reap_orphaned_automation_browsers() {}
-
-#[cfg(target_os = "linux")]
-fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
-    !needle.is_empty()
-        && haystack.len() >= needle.len()
-        && haystack.windows(needle.len()).any(|window| window == needle)
-}
-
-/// Auto-accept any `alert`/`confirm`/`beforeunload` dialog the editor raises;
-/// an unhandled dialog blocks the page's JS and hangs `evaluate`.
-async fn auto_accept_dialogs(page: &Page) -> Result<()> {
-    let mut dialogs = page
-        .event_listener::<EventJavascriptDialogOpening>()
-        .await?;
-    // The accept loop runs concurrently with the driver's own use of the page, so
-    // it needs its own handle; a chromiumoxide `Page` clone is a cheap refcount.
-    let page = page.clone();
-    tokio::spawn(async move {
-        while dialogs.next().await.is_some() {
-            if let Ok(params) = HandleJavaScriptDialogParams::builder().accept(true).build() {
-                let _ = page.execute(params).await;
-            }
-        }
-    });
-    Ok(())
 }

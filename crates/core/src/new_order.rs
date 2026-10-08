@@ -22,7 +22,7 @@ pub struct NewOrderOptions {
 impl NewOrderOptions {
     fn template(&self) -> Result<Order> {
         let name = self.name.trim();
-        if name.is_empty() || name.len() > 200 {
+        if name.is_empty() || name.chars().count() > 200 {
             return Err(Error::Invalid(
                 "enter an order name of 1–200 characters".into(),
             ));
@@ -31,12 +31,7 @@ impl NewOrderOptions {
             return Err(Error::Invalid("plastic cardstock cannot be foil".into()));
         }
         let backs = if let Some(back) = &self.cardback {
-            if back.drive_id.is_empty()
-                || !back
-                    .drive_id
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-            {
+            if !crate::order::valid_drive_id(&back.drive_id) {
                 return Err(Error::Invalid(
                     "selected cardback has an invalid Google Drive ID".into(),
                 ));

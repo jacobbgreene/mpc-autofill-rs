@@ -55,6 +55,7 @@
   let downloadFailures = 0;
   let searchInput: HTMLInputElement;
   let editorMode: "edit" | "replace" | "create" | null = null;
+  let resumeDraft = false;
   let draftText = "";
   let draftName = "New deck";
   let savedMessage = "";
@@ -164,10 +165,10 @@
               if (payload.type === "drop") {
                 if (
                   payload.paths.length !== 1 ||
-                  !/\.(xml|txt)$/i.test(payload.paths[0])
+                  !/\.(xml|txt|mpcdeck)$/i.test(payload.paths[0])
                 ) {
                   orderError =
-                    "Choose one .xml order or .txt decklist at a time.";
+                    "Choose one .xml order, .mpcdeck draft, or .txt decklist at a time.";
                   return;
                 }
                 void openPath(payload.paths[0]);
@@ -231,7 +232,7 @@
       pending = [];
       summary = loaded;
       cards = loaded.cards.map((card) => ({ ...card, status: "pending" }));
-      void loadDpi();
+      if (!loaded.draft) void loadDpi();
       phase = "";
       error = "";
       previewError = "";
@@ -240,15 +241,16 @@
       query = "";
       filter = "all";
       selectedKey = null;
-      savedMessage = "";
+      savedMessage = loaded.draft ? "Draft saved" : "Deck saved";
       await tick();
       window.scrollTo({ top: 0 });
-      invoke("thumbnails").catch(() => {
-        // A thumbnail failure does not prevent full image downloads or autofill.
-        if (summary === loaded)
-          previewError =
-            "Card previews could not be loaded. You can still start autofill.";
-      });
+      if (!loaded.draft)
+        invoke("thumbnails").catch(() => {
+          // A thumbnail failure does not prevent full image downloads or autofill.
+          if (summary === loaded)
+            previewError =
+              "Card previews could not be loaded. You can still start autofill.";
+        });
     } catch (e) {
       orderError = `Could not open this order: ${String(e)}`;
     } finally {
@@ -259,7 +261,14 @@
   function pasteDecklist() {
     draftText = "";
     draftName = "New deck";
+    resumeDraft = false;
     editorMode = "create";
+  }
+
+  function replaceWithDecklist(text = "") {
+    draftText = text;
+    resumeDraft = false;
+    editorMode = "replace";
   }
 
   async function openPath(path: string) {
@@ -275,7 +284,8 @@
           .split(/[\\/]/)
           .pop()
           ?.replace(/\.txt$/i, "") || "New deck";
-      editorMode = "create";
+      resumeDraft = false;
+      editorMode = summary && !summary.draft ? "replace" : "create";
     } catch (e) {
       orderError = `Could not import this decklist: ${String(e)}`;
     } finally {
@@ -292,7 +302,9 @@
         multiple: false,
         filters: textOnly
           ? [{ name: "Text decklist", extensions: ["txt"] }]
-          : [{ name: "Order or decklist", extensions: ["xml", "txt"] }],
+          : summary
+            ? [{ name: "Order or draft", extensions: ["xml", "mpcdeck"] }]
+            : [{ name: "Order, draft, or decklist", extensions: ["xml", "mpcdeck", "txt"] }],
       });
       busy = false;
       if (typeof path === "string") await openPath(path);
@@ -304,7 +316,7 @@
   }
 
   async function fill() {
-    if (busy || !summary || !connected) return;
+    if (busy || !summary || summary.draft || !connected) return;
     busy = true;
     running = true;
     error = "";
@@ -334,7 +346,7 @@
   }
 
   async function saveOrder(saveAs = false) {
-    if (busy || !summary) return;
+    if (busy || !summary || summary.draft) return;
     busy = true;
     orderError = "";
     savedMessage = "";
@@ -475,11 +487,15 @@
       thumb: thumbnails.get(card.drive_id),
       status: "pending",
     }));
-    void loadDpi();
+    if (!edited.draft) void loadDpi();
     phase = "";
     error = "";
     orderError = "";
-    savedMessage = "";
+    savedMessage = edited.draft
+      ? "Draft saved"
+      : !edited.dirty && edited.path
+        ? "Deck saved"
+        : "";
     previewError = "";
     downloadCompleted = 0;
     downloadFailures = 0;
@@ -488,11 +504,12 @@
       filter = "all";
     }
     editorMode = null;
-    invoke("thumbnails").catch(
-      () =>
-        (previewError =
-          "Card previews could not be loaded. You can still start autofill."),
-    );
+    if (!edited.draft)
+      invoke("thumbnails").catch(
+        () =>
+          (previewError =
+            "Card previews could not be loaded. You can still start autofill."),
+      );
   }
 </script>
 
@@ -502,6 +519,7 @@
       (event.ctrlKey || event.metaKey) &&
       event.key.toLowerCase() === "s" &&
       summary &&
+      !summary.draft &&
       !editorMode &&
       !artworkCard &&
       !selectedCard
@@ -513,6 +531,7 @@
       (event.ctrlKey || event.metaKey) &&
       event.key.toLowerCase() === "f" &&
       summary &&
+      !summary.draft &&
       !selectedCard &&
       !artworkCard &&
       !editorMode
@@ -542,14 +561,25 @@
           disabled={busy}
           on:click={browseSavedDecks}
           ><Icon name="grid" size={16} />Saved decks</button
-        ><button
+        >{#if summary.draft}<button
+          class="button primary small"
+          disabled={busy}
+          on:click={() => {
+            resumeDraft = true;
+            editorMode = "create";
+          }}>Continue import</button
+        >{:else}<button
           class="button secondary small"
           disabled={busy}
           on:click={() => (editorMode = "edit")}>Edit list</button
         ><button
           class="button secondary small"
           disabled={busy}
-          on:click={() => (editorMode = "replace")}>Replace deck</button
+          on:click={() => replaceWithDecklist()}>Replace deck</button
+        ><button
+          class="button secondary small"
+          disabled={busy || !connected}
+          on:click={pasteDecklist}>New deck</button
         ><button
           class="button secondary small"
           on:click={() => saveOrder()}
@@ -558,11 +588,11 @@
           class="button secondary small"
           on:click={() => saveOrder(true)}
           disabled={busy || !connected}>Save as…</button
-        ><button
+        >{/if}<button
           class="button secondary small"
           on:click={() => openOrder()}
           disabled={busy || !connected}
-          ><Icon name="folder" size={16} />Open order</button
+          ><Icon name="folder" size={16} />Open deck…</button
         >
       </div>{/if}
     <ThemePicker />
@@ -623,13 +653,13 @@
                   ? "Drop your file here"
                   : "Drop a decklist or order here"}
               </h2>
-              <p>Text decklist (.txt) or MPC Autofill order (.xml)</p>
+              <p>Text decklist (.txt), saved draft (.mpcdeck), or MPC Autofill order (.xml)</p>
             </div>
             <button
               class="button secondary"
               on:click={() => openOrder()}
               disabled={busy || !connected}
-              >{busy ? "Opening…" : "Open order"}<Icon
+              >{busy ? "Opening…" : "Open deck…"}<Icon
                 name="arrow"
                 size={16}
               /></button
@@ -662,6 +692,39 @@
         </section>
       {/if}
     {:else}
+      {#if summary.draft}
+        <section class="draft-review" aria-labelledby="draft-title">
+          <p class="eyebrow">SAVED DRAFT</p>
+          <h1 id="draft-title">{summary.name}</h1>
+          <p>
+            Your imported decklist is saved. Continue importing to fix its issues and
+            create an order for autofill.
+          </p>
+          {#if summary.draft_error}<div class="notice error-notice" role="alert">
+              <Icon name="warning" />
+              <p>{summary.draft_error}</p>
+            </div>{:else}<p class="notice" role="status">
+              This draft is ready to create. Continue import to review it.
+            </p>{/if}
+          <div class="draft-actions">
+            <button
+              class="button primary"
+              disabled={busy || !connected}
+              on:click={() => {
+                resumeDraft = true;
+                editorMode = "create";
+              }}>Continue import</button
+            >
+            <button
+              class="button secondary"
+              disabled={busy}
+              on:click={browseSavedDecks}>Saved decks</button
+            >
+          </div>
+          <h2>Imported decklist</h2>
+          <pre class="draft-text">{summary.draft.text}</pre>
+        </section>
+      {:else}
       <section class="order-overview" aria-labelledby="order-title">
         <div class="order-heading">
           <p class="eyebrow">YOUR ORDER</p>
@@ -671,6 +734,13 @@
               >{summary.stock}</span
             ><span>{summary.foil ? "Foil finish" : "Non-foil"}</span>
           </div>
+        </div>
+        <div class="decklist-actions">
+          <button class="button primary small" disabled={busy || !connected}
+            on:click={() => replaceWithDecklist()}>Paste replacement decklist</button>
+          <button class="button secondary small" disabled={busy || !connected}
+            on:click={() => openOrder(true)}>Import replacement .txt</button>
+          <span>Matching cards can reuse artwork from this deck.</span>
         </div>
         <div class="order-actions">
           {#each cardbacks as card (cardKey(card))}
@@ -837,14 +907,17 @@
           >{summary.quantity} cards · {cards.length} front and back images</span
         ><span>Made for your next deck.</span>
       </footer>
+      {/if}
     {/if}
   </main>
 </div>
 
 {#if dragging && summary}<div class="drop-overlay" role="status">
     <Icon name="import" size={40} />
-    <h2>Drop a .txt decklist or .xml order</h2>
-    <p>Text lists open as a new deck draft.</p>
+    <h2>Drop a .txt decklist, .mpcdeck draft, or .xml order</h2>
+    <p>{summary.draft
+        ? "Text lists start a new deck; saved drafts can be resumed."
+        : "Text lists replace the open deck and can reuse its artwork; saved drafts can be resumed."}</p>
   </div>{/if}
 <CardPreview
   card={selectedCard}
@@ -862,8 +935,10 @@
   />{/if}
 {#if editorMode}<DeckEditor
     mode={editorMode}
-    initialText={editorMode === "create" ? draftText : ""}
-    initialName={draftName}
+    initialText={editorMode !== "edit" && !resumeDraft ? draftText : ""}
+    initialName={resumeDraft && summary ? summary.name : draftName}
+    initialDraft={editorMode === "create" && resumeDraft ? summary?.draft ?? null : null}
+    draftPath={editorMode === "create" && resumeDraft && summary?.draft ? summary.path : ""}
     replacingUnsaved={summary?.dirty ?? false}
     on:close={() => (editorMode = null)}
     on:applied={(event) => applyEditedOrder(event.detail)}

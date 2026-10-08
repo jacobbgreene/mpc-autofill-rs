@@ -37,9 +37,13 @@ fn label(card: &Card) -> String {
     card.name
         .as_deref()
         .map(|name| {
-            [".png", ".jpg", ".jpeg", ".webp"]
-                .iter()
-                .find_map(|extension| name.strip_suffix(extension))
+            name.rsplit_once('.')
+                .filter(|(_, extension)| {
+                    ["png", "jpg", "jpeg", "webp"]
+                        .iter()
+                        .any(|known| extension.eq_ignore_ascii_case(known))
+                })
+                .map(|(stem, _)| stem)
                 .unwrap_or(name)
                 .to_owned()
         })
@@ -47,11 +51,14 @@ fn label(card: &Card) -> String {
 }
 
 fn candidates<'a>(cards: &'a [Card], query: &str) -> Vec<&'a Card> {
+    let ids: Vec<_> = cards.iter().filter(|card| card.drive_id == query).collect();
+    if !ids.is_empty() {
+        return ids;
+    }
     let exact: Vec<_> = cards
         .iter()
         .filter(|card| {
-            card.drive_id == query
-                || label(card).eq_ignore_ascii_case(query)
+            label(card).eq_ignore_ascii_case(query)
                 || card
                     .name
                     .as_deref()
@@ -83,23 +90,25 @@ fn resolve(
         .iter()
         .find(|s| s.face == face && s.query.eq_ignore_ascii_case(query))
     {
-        if selection.drive_id.is_empty()
-            || !selection
-                .drive_id
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-        {
+        if !crate::order::valid_drive_id(&selection.drive_id) {
             return Err(Error::Invalid(
                 "selected artwork has an invalid Google Drive ID".into(),
             ));
         }
-        return Ok(Some(Card {
+        let mut selected = Card {
             drive_id: selection.drive_id.clone(),
             source: Source::GoogleDrive,
             slots: BTreeSet::new(),
             name: Some(selection.name.clone()),
             query: Some(query.into()),
-        }));
+        };
+        if let Some(existing) = cards
+            .iter()
+            .find(|card| card.drive_id == selection.drive_id && card.source == Source::GoogleDrive)
+        {
+            selected.slots = existing.slots.clone();
+        }
+        return Ok(Some(selected));
     }
     let matches = candidates(cards, query);
     match matches.as_slice() {
@@ -156,9 +165,13 @@ fn is_section_heading(line: &str) -> bool {
 fn parse_line(line: &str, number: usize) -> Result<(u32, &str, Option<&str>)> {
     let (count, names) = match line.split_once(char::is_whitespace) {
         Some((prefix, rest)) if prefix.chars().next().is_some_and(|c| c.is_ascii_digit()) => {
-            let count: u32 = prefix.trim_end_matches(['x', 'X']).parse().map_err(|_| {
-                Error::Invalid(format!("line {number}: invalid quantity '{prefix}'"))
-            })?;
+            let count: u32 = prefix
+                .strip_suffix(['x', 'X'])
+                .unwrap_or(prefix)
+                .parse()
+                .map_err(|_| {
+                    Error::Invalid(format!("line {number}: invalid quantity '{prefix}'"))
+                })?;
             (count, rest.trim())
         }
         _ => (1, line),
@@ -170,6 +183,7 @@ fn parse_line(line: &str, number: usize) -> Result<(u32, &str, Option<&str>)> {
     }
     let (front, back) = names
         .split_once('|')
+        .or_else(|| names.split_once("//"))
         .map_or((names, None), |(front, back)| {
             (front.trim(), Some(back.trim()))
         });
@@ -185,7 +199,12 @@ impl Order {
     pub fn to_decklist(&self) -> Result<String> {
         let unique_label = |card: &Card, face: &[Card]| {
             let name = label(card);
-            if candidates(face, &name).len() == 1 {
+            if !name.contains('|')
+                && !name.contains("//")
+                && !name.contains(['\r', '\n'])
+                && name.trim() == name
+                && matches!(candidates(face, &name).as_slice(), [found] if found.drive_id == card.drive_id && found.source == card.source)
+            {
                 name
             } else {
                 card.drive_id.clone()
@@ -255,7 +274,7 @@ impl Order {
             needs_common_back: false,
         };
         for (index, line) in text.lines().enumerate() {
-            let line = line.trim().trim_start_matches('\u{feff}');
+            let line = line.trim().trim_start_matches('\u{feff}').trim();
             if line.is_empty()
                 || line.starts_with('#')
                 || line.starts_with("//")
@@ -457,6 +476,69 @@ mod tests {
         assert_eq!(edited.backs[1].slots, BTreeSet::from([2]));
     }
     #[test]
+    fn replacement_keeps_front_art_when_a_custom_back_is_added() {
+        let original = order();
+        let selections = [ArtworkSelection {
+            query: "Insectile Aberration".into(),
+            face: "back".into(),
+            drive_id: "new-insect".into(),
+            name: "Insectile Aberration.png".into(),
+        }];
+        let edited = original
+            .edit_decklist("2 Island\n1 Delver | Insectile Aberration", &selections)
+            .unwrap();
+        assert_eq!(
+            edited
+                .fronts
+                .iter()
+                .find(|card| card.drive_id == "b")
+                .unwrap()
+                .slots,
+            BTreeSet::from([2])
+        );
+        assert_eq!(
+            edited
+                .backs
+                .iter()
+                .find(|card| card.drive_id == "new-insect")
+                .unwrap()
+                .slots,
+            BTreeSet::from([2])
+        );
+        assert_eq!(
+            edited
+                .backs
+                .iter()
+                .find(|card| card.drive_id == "common")
+                .unwrap()
+                .slots,
+            BTreeSet::from([0, 1])
+        );
+    }
+    #[test]
+    fn double_slash_marks_a_back_without_losing_matching_front_art() {
+        let original = order();
+        let preview = original
+            .preview_decklist("// note\n1 Delver // Insectile Aberration", &[])
+            .unwrap();
+        assert_eq!(preview.unresolved.len(), 1);
+        assert_eq!(preview.unresolved[0].query, "Insectile Aberration");
+        assert_eq!(preview.unresolved[0].face, "back");
+        let edited = original
+            .edit_decklist(
+                "// note\n1 Delver // Insectile Aberration",
+                &[ArtworkSelection {
+                    query: "Insectile Aberration".into(),
+                    face: "back".into(),
+                    drive_id: "new-insect".into(),
+                    name: "Insectile Aberration.png".into(),
+                }],
+            )
+            .unwrap();
+        assert_eq!(edited.fronts[0].drive_id, "b");
+        assert_eq!(edited.backs[0].drive_id, "new-insect");
+    }
+    #[test]
     fn new_cards_require_explicit_artwork_and_use_common_back() {
         let original = order();
         assert_eq!(
@@ -494,6 +576,7 @@ mod tests {
             "612 Island\n1 Delver",
             "1 | Back",
             "1 Island |",
+            "2xx Island",
         ] {
             assert!(original.edit_decklist(text, &[]).is_err(), "{text}");
         }
@@ -506,6 +589,59 @@ mod tests {
             .unwrap();
         assert_eq!(preview.quantity, 2);
         assert_eq!(preview.unresolved.len(), 1);
+    }
+    #[test]
+    fn full_image_id_disambiguates_a_name_that_matches_another_image_id() {
+        let original =
+            Order::from_xml("Deck", &XML.replace("Island (Art A).png", "b.png")).unwrap();
+        let edited = original.edit_decklist("1 b", &[]).unwrap();
+        assert_eq!(edited.fronts[0].drive_id, "b");
+        let round_trip = original
+            .edit_decklist(&original.to_decklist().unwrap(), &[])
+            .unwrap();
+        assert_eq!(round_trip.fronts, original.fronts);
+    }
+
+    #[test]
+    fn artwork_names_with_decklist_delimiters_round_trip_using_image_ids() {
+        for name in ["Fire // Ice.png", "Fire | Ice.png", "Fire\nIce.png"] {
+            let original =
+                Order::from_xml("Deck", &XML.replace("Island (Art A).png", name)).unwrap();
+            let edited = original
+                .edit_decklist(&original.to_decklist().unwrap(), &[])
+                .unwrap();
+            for (face, card) in original.images() {
+                assert!(edited
+                    .images()
+                    .any(|(saved_face, saved)| saved_face == face && saved == card));
+            }
+        }
+    }
+
+    #[test]
+    fn selecting_an_existing_front_retains_its_custom_back() {
+        let original = order();
+        let edited = original
+            .edit_decklist(
+                "2 Delver",
+                &[ArtworkSelection {
+                    query: "Delver".into(),
+                    face: "front".into(),
+                    drive_id: "b".into(),
+                    name: "Delver.png".into(),
+                }],
+            )
+            .unwrap();
+        assert_eq!(edited.backs[0].drive_id, "special");
+        assert_eq!(edited.backs[0].slots, BTreeSet::from([0, 1]));
+    }
+
+    #[test]
+    fn uppercase_image_extensions_and_bom_whitespace_resolve_existing_art() {
+        let original = Order::from_xml("Deck", &XML.replace("Delver.png", "Delver.PNG")).unwrap();
+        let edited = original.edit_decklist("\u{feff}  2 Delver", &[]).unwrap();
+        assert_eq!(edited.fronts[0].drive_id, "b");
+        assert_eq!(edited.details.quantity, 2);
     }
     #[test]
     fn multiple_backs_for_one_front_round_trip_with_explicit_names() {

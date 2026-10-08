@@ -1,22 +1,25 @@
 <script lang="ts">
   import { createEventDispatcher, onMount, onDestroy, tick } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import { open, confirm } from "@tauri-apps/plugin-dialog";
+  import { open, save, confirm } from "@tauri-apps/plugin-dialog";
   import Icon from "./Icon.svelte";
   import ArtworkCard from "./ArtworkCard.svelte";
   import ArtworkGallery from "./ArtworkGallery.svelte";
   import ArtworkThumbnail from "./ArtworkThumbnail.svelte";
+  import { cardBackChanged, initialCardBack } from "./favoriteBacks";
   import {
     createArtworkSearch,
     type ArtworkChoice,
     type ArtworkResults,
   } from "./artwork";
-  import type { OrderSummary } from "./order";
+  import type { DeckDraft, OrderSummary } from "./order";
 
   export let mode: "edit" | "replace" | "create";
   export let initialText = "";
   export let initialName = "New deck";
   export let replacingUnsaved = false;
+  export let initialDraft: DeckDraft | null = null;
+  export let draftPath = "";
   const dispatch = createEventDispatcher<{
     close: void;
     applied: OrderSummary;
@@ -37,17 +40,19 @@
   let dialog: HTMLDialogElement;
   let body: HTMLDivElement;
   let grid: HTMLDivElement;
-  let text = initialText;
-  let originalText = initialText;
-  let orderName = "";
+  let text = initialDraft?.text ?? initialText;
+  let originalText = initialDraft?.text ?? initialText;
+  let orderName = initialDraft?.name ?? "";
   $: effectiveName = orderName.trim() || initialName.trim() || "New deck";
-  let stock = "S30";
-  let foil = false;
-  let commonBack: ArtworkChoice | null = null;
+  let stock = initialDraft?.stock ?? "S30";
+  let foil = initialDraft?.foil ?? false;
+  let commonBack: ArtworkChoice | null =
+    mode === "create" ? initialCardBack(initialDraft) : null;
+  const startingCommonBackId = commonBack?.art.drive_id ?? null;
   let busy = true;
   let error = "";
   let preview: Preview | null = null;
-  let choices: Record<string, ArtworkChoice> = {};
+  let choices: Record<string, ArtworkChoice> = initialDraft?.choices ?? {};
   let loading = new Set<string>();
   let showText = true;
   let backGallery = false;
@@ -94,11 +99,22 @@
   }
   async function close() {
     if (busy) return;
-    if (
-      (text !== originalText ||
+    const changed = initialDraft
+      ? JSON.stringify({ text, name: effectiveName, stock, foil, choices, commonBack }) !==
+        JSON.stringify({
+          text: initialDraft.text,
+          name: initialDraft.name,
+          stock: initialDraft.stock,
+          foil: initialDraft.foil,
+          choices: initialDraft.choices,
+          commonBack: initialDraft.common_back,
+        })
+      : text !== originalText ||
         selections.length > 0 ||
-        commonBack ||
-        (mode === "create" && (orderName.trim() || stock !== "S30" || foil))) &&
+        cardBackChanged(commonBack, startingCommonBackId) ||
+        (mode === "create" && (orderName.trim() || stock !== "S30" || foil));
+    if (
+      changed &&
       !(await confirm(
         "Discard this draft decklist? Your current order will stay unchanged.",
         { title: "Discard draft", kind: "warning" },
@@ -198,11 +214,58 @@
               text,
               selections,
               options: newOrderOptions(),
+              saveNamed: !!orderName.trim(),
             })
           : await invoke<OrderSummary>("edit_decklist", { text, selections });
       dispatch("applied", summary);
     } catch (e) {
       error = String(e);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function saveDraft() {
+    if (mode !== "create" || !text.trim() || busy) return;
+    busy = true;
+    error = "";
+    try {
+      if (
+        replacingUnsaved &&
+        !(await confirm(
+          "Save this draft and discard the unsaved changes in your current order?",
+          { title: "Unsaved changes", kind: "warning" },
+        ))
+      )
+        return;
+      let path = draftPath;
+      if (!path) {
+        const fileName = `${effectiveName.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")}.mpcdeck`;
+        let defaultPath = fileName;
+        try {
+          defaultPath = await invoke<string>("default_deck_path", { fileName });
+        } catch {
+          // The picker still permits another user-owned save location.
+        }
+        path = (await save({
+          defaultPath,
+          filters: [{ name: "MPC Autofill draft", extensions: ["mpcdeck"] }],
+        })) ?? "";
+        if (!path) return;
+      }
+      const draft: DeckDraft = {
+        version: 1,
+        text,
+        name: effectiveName,
+        stock,
+        foil,
+        choices,
+        common_back: commonBack,
+      };
+      const summary = await invoke<OrderSummary>("save_draft", { draft, path });
+      dispatch("applied", summary);
+    } catch (e) {
+      error = `Could not save this draft: ${String(e)}`;
     } finally {
       busy = false;
     }
@@ -270,7 +333,7 @@
               ? "Paste your card list or import a .txt file to start choosing artwork."
               : mode === "edit"
                 ? "Change quantities, remove cards, or add something new. Matching cards keep their artwork."
-                : "Paste another decklist or import a .txt file. Matching cards keep their artwork."}
+                : "Paste another decklist or import a .txt file. Cards matching this order reuse their artwork; new cards need artwork choices."}
           </p>{/if}
         <div class="editor-label">
           <label for="decklist-text">Decklist</label><button
@@ -286,13 +349,13 @@
           on:input={invalidate}
           disabled={busy}
           spellcheck="false"
-          placeholder={"1 Lightning Bolt\n4 Island\n1 Delver of Secrets | Insectile Aberration"}
+          placeholder={"1 Lightning Bolt\n4 Island\n1 Delver of Secrets // Insectile Aberration"}
           aria-describedby="decklist-help"
         />
         <p id="decklist-help" class="editor-help">
           One card per line: <code>4 Island</code> or <code>4x Island</code>.
-          Use <code>Front name | Back name</code> for double-faced cards. Blank
-          lines and # comments are ignored, as are headings like
+          Use <code>Front name // Back name</code> or <code>Front name | Back name</code> for double-faced cards. Blank
+          lines and whole-line # or // comments are ignored, as are headings like
           <code>CREATURES (20)</code>. Maximum 612 cards.
         </p>
       </div>
@@ -311,7 +374,7 @@
               placeholder={initialName.trim() || "New deck"}
               maxlength="200"
               disabled={busy}
-            /></label
+            /><small>Enter a name to save the deck automatically in Saved decks.</small></label
           >
           <label
             >Cardstock<select bind:value={stock} disabled={busy}>
@@ -392,15 +455,21 @@
     <span
       ><span role="status"
         >{!preview
-          ? "Your card previews will appear in the next step."
+          ? mode === "create"
+            ? "Save a draft now, even if the decklist needs fixes."
+            : "Your card previews will appear in the next step."
           : loading.size
             ? `Finding artwork for ${loading.size} image${loading.size === 1 ? "" : "s"}…`
             : remaining.length
-              ? `${remaining.length} image${remaining.length === 1 ? " needs" : "s need"} artwork. Open a gallery to search.`
+              ? mode === "create"
+                ? `${remaining.length} image${remaining.length === 1 ? " needs" : "s need"} artwork. Save a draft to finish later.`
+                : `${remaining.length} image${remaining.length === 1 ? " needs" : "s need"} artwork. Open a gallery to search.`
               : needsBack
                 ? "Choose a common card back to finish your deck."
                 : mode === "create"
-                  ? "Ready to create. Save your deck as XML afterwards."
+                  ? orderName.trim()
+                    ? "Ready to create and save your deck in Saved decks."
+                    : "Ready to create. Enter a deck name to save it automatically."
                   : "Ready to apply. Save your order to keep these changes."}</span
       >
       {#if needsBack}<button
@@ -413,6 +482,11 @@
     <button class="button secondary" disabled={busy} on:click={close}
       >Cancel</button
     >
+    {#if mode === "create"}<button
+        class="button secondary"
+        disabled={busy || !text.trim()}
+        on:click={saveDraft}>Save draft</button
+      >{/if}
     {#if preview}<button
         class="button primary"
         disabled={busy || !!loading.size || !!remaining.length || needsBack}

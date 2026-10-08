@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use tokio::sync::Mutex;
 
-use crate::files::write_atomic;
+use crate::draft;
+use crate::files::{write_atomic, write_new};
 
 pub struct SavedDecks {
     folder: PathBuf,
@@ -33,6 +34,7 @@ pub struct SavedDeck {
     foil: bool,
     modified: u64,
     preview_id: Option<String>,
+    draft: bool,
 }
 
 #[derive(Serialize)]
@@ -73,6 +75,32 @@ impl SavedDecks {
         .map_err(|e| e.to_string())?
     }
 
+    pub async fn save_new_order(&self, order: &Order) -> Result<PathBuf, String> {
+        let _guard = self.gate.lock().await;
+        let folder = self.folder.clone();
+        let stem = safe_file_stem(&order.name);
+        let xml = order.to_xml().map_err(|e| e.to_string())?;
+        tokio::task::spawn_blocking(move || {
+            std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+            for number in 1..=10_000 {
+                let file_name = if number == 1 {
+                    format!("{stem}.xml")
+                } else {
+                    format!("{stem} ({number}).xml")
+                };
+                let path = folder.join(file_name);
+                match write_new(&path, &xml) {
+                    Ok(()) => return Ok(path),
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                    Err(error) => return Err(error.to_string()),
+                }
+            }
+            Err("too many decks with this name".into())
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    }
+
     async fn list(&self) -> Result<Listing, String> {
         let _guard = self.gate.lock().await;
         let folder = self.folder.clone();
@@ -87,14 +115,61 @@ impl SavedDecks {
         // The picker may choose another location; this is only its initial path.
         if Path::new(file_name).file_name().and_then(|s| s.to_str()) != Some(file_name)
             || file_name.contains(['/', '\\'])
-            || !is_xml(Path::new(file_name))
+            || !is_deck_file(Path::new(file_name))
         {
-            return Err("choose an XML filename without a directory".into());
+            return Err("choose an XML order or .mpcdeck filename without a directory".into());
         }
         tokio::fs::create_dir_all(&self.folder)
             .await
             .map_err(|e| format!("Could not create the deck folder: {e}"))?;
-        Ok(self.folder.join(file_name).to_string_lossy().into_owned())
+        let requested = Path::new(file_name);
+        let stem = safe_file_stem(
+            requested
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("Deck"),
+        );
+        let extension = requested.extension().and_then(|s| s.to_str()).unwrap();
+        Ok(self
+            .folder
+            .join(format!("{stem}.{extension}"))
+            .to_string_lossy()
+            .into_owned())
+    }
+}
+
+fn safe_file_stem(name: &str) -> String {
+    let mut stem = String::new();
+    for character in name.trim().chars() {
+        let safe = if character.is_control() || "<>:\"/\\|?*".contains(character) {
+            '_'
+        } else {
+            character
+        };
+        if stem.len() + safe.len_utf8() > 180 {
+            break;
+        }
+        stem.push(safe);
+    }
+    let stem = stem.trim_matches([' ', '.']);
+    if stem.is_empty() {
+        return "Deck".into();
+    }
+    // Windows reserves these device names even when followed by extensions.
+    let base = stem.split('.').next().unwrap_or(stem).to_ascii_uppercase();
+    let device = matches!(base.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ["COM", "LPT"].iter().any(|prefix| {
+            base.strip_prefix(prefix).is_some_and(|number| {
+                matches!(
+                    number,
+                    "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+                )
+            })
+        });
+    if device {
+        format!("_{stem}")
+    } else {
+        stem.into()
     }
 }
 
@@ -117,6 +192,10 @@ fn is_xml(path: &Path) -> bool {
         .is_some_and(|s| s.eq_ignore_ascii_case("xml"))
 }
 
+fn is_deck_file(path: &Path) -> bool {
+    is_xml(path) || draft::is_draft(path)
+}
+
 fn read_index(path: &Path) -> Result<Index, String> {
     match std::fs::read_to_string(path) {
         Ok(text) => serde_json::from_str(&text).map_err(|e| e.to_string()),
@@ -135,11 +214,11 @@ fn write_index(path: &Path, index: &Index) -> Result<(), String> {
     )
 }
 
-fn xml_files(folder: &Path) -> Result<Vec<PathBuf>, String> {
+fn deck_files(folder: &Path) -> Result<Vec<PathBuf>, String> {
     match std::fs::read_dir(folder) {
         Ok(entries) => entries
             .filter_map(|entry| match entry {
-                Ok(entry) if is_xml(&entry.path()) => Some(Ok(entry.path())),
+                Ok(entry) if is_deck_file(&entry.path()) => Some(Ok(entry.path())),
                 Ok(_) => None,
                 Err(e) => Some(Err(e.to_string())),
             })
@@ -150,35 +229,56 @@ fn xml_files(folder: &Path) -> Result<Vec<PathBuf>, String> {
 }
 
 fn describe(path: &Path) -> Result<SavedDeck, String> {
-    if !is_xml(path) {
-        return Err("not an XML order".into());
+    if !is_deck_file(path) {
+        return Err("not an order or deck draft".into());
     }
     let path = std::fs::canonicalize(path).map_err(|e| e.to_string())?;
     let metadata = path.metadata().map_err(|e| e.to_string())?;
     if !metadata.is_file() || metadata.len() > 8 * 1024 * 1024 {
         return Err("not an order file under 8 MB".into());
     }
-    let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Deck");
-    let xml = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let order = Order::from_xml(name, &xml).map_err(|e| e.to_string())?;
-    let preview_id = order
-        .fronts
-        .iter()
-        .find(|card| {
-            card.source == Source::GoogleDrive
-                && !card.drive_id.is_empty()
-                && card
-                    .drive_id
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-        })
-        .map(|card| card.drive_id.clone());
+    let (name, quantity, stock, foil, preview_id, is_draft) = if draft::is_draft(&path) {
+        let saved = draft::read(&path)?;
+        let (quantity, _) = saved.preview();
+        (
+            saved.name,
+            quantity,
+            saved.stock.label().to_owned(),
+            saved.foil,
+            None,
+            true,
+        )
+    } else {
+        let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Deck");
+        let xml = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        let order = Order::from_xml(name, &xml).map_err(|e| e.to_string())?;
+        let preview_id = order
+            .fronts
+            .iter()
+            .find(|card| {
+                card.source == Source::GoogleDrive
+                    && !card.drive_id.is_empty()
+                    && card
+                        .drive_id
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            })
+            .map(|card| card.drive_id.clone());
+        (
+            order.name,
+            order.details.quantity,
+            order.details.stock.label().to_owned(),
+            order.details.foil,
+            preview_id,
+            false,
+        )
+    };
     Ok(SavedDeck {
         path: path.to_string_lossy().into_owned(),
-        name: order.name,
-        quantity: order.details.quantity,
-        stock: order.details.stock.label().into(),
-        foil: order.details.foil,
+        name,
+        quantity,
+        stock,
+        foil,
         modified: metadata
             .modified()
             .ok()
@@ -186,6 +286,7 @@ fn describe(path: &Path) -> Result<SavedDeck, String> {
             .map(|time| time.as_millis() as u64)
             .unwrap_or(0),
         preview_id,
+        draft: is_draft,
     })
 }
 
@@ -201,7 +302,7 @@ fn list_files(folder: &Path, documents: Option<&Path>, index_path: &Path) -> Lis
     // Pick up orders saved by older versions once. Do not move files or scan
     // unrelated subdirectories. Future opens and saves register their paths.
     if !index.imported_documents {
-        let legacy = documents.map(xml_files).transpose();
+        let legacy = documents.map(deck_files).transpose();
         match legacy {
             Ok(paths) => {
                 for path in paths.into_iter().flatten() {
@@ -227,7 +328,7 @@ fn list_files(folder: &Path, documents: Option<&Path>, index_path: &Path) -> Lis
         .iter()
         .map(|path| (path.clone(), true))
         .collect();
-    match xml_files(folder) {
+    match deck_files(folder) {
         Ok(paths) => candidates.extend(paths.into_iter().map(|path| (path, false))),
         Err(error) => warnings.push(format!("Could not read the deck folder: {error}")),
     }
@@ -297,6 +398,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn named_decks_save_without_replacing_an_existing_deck() {
+        let fixture = Fixture::new();
+        let library = fixture.library();
+        let mut order = Order::from_xml("My/Deck", XML).unwrap();
+        let first = library.save_new_order(&order).await.unwrap();
+        let original = std::fs::read_to_string(&first).unwrap();
+        order.details.foil = true;
+        let second = library.save_new_order(&order).await.unwrap();
+        assert_eq!(first.file_name().unwrap(), "My_Deck.xml");
+        assert_eq!(second.file_name().unwrap(), "My_Deck (2).xml");
+        assert_eq!(std::fs::read_to_string(&first).unwrap(), original);
+        assert_eq!(Order::from_file(&first).await.unwrap().name, "My/Deck");
+        let listing = library.list().await.unwrap();
+        assert_eq!(listing.decks.len(), 2);
+        assert!(listing.decks.iter().all(|deck| deck.name == "My/Deck"));
+    }
+
+    #[test]
+    fn named_deck_filenames_are_portable_and_fit_component_limits() {
+        for name in ["CON", "aux.notes", "Lpt9", "COM¹"] {
+            assert_eq!(safe_file_stem(name), format!("_{name}"));
+        }
+        assert_eq!(safe_file_stem("  .. "), "Deck");
+        assert_eq!(safe_file_stem("My/Deck"), "My_Deck");
+        assert_eq!(safe_file_stem("COM10"), "COM10");
+        assert!(safe_file_stem(&"é".repeat(200)).len() <= 180);
+    }
+
+    #[tokio::test]
     async fn discovers_managed_and_legacy_decks_without_moving_or_recursing() {
         let fixture = Fixture::new();
         let library = fixture.library();
@@ -328,6 +458,7 @@ mod tests {
         assert_eq!(read_index(&library.index).unwrap().paths.len(), 1);
         let replacement = XML
             .replace("<quantity>3", "<quantity>4")
+            .replace("<slots>0,1,2", "<slots>0,1,2,3")
             .replace("<foil>false", "<foil>true");
         std::fs::write(&path, replacement).unwrap();
         let listing = fixture.library().list().await.unwrap();
@@ -402,6 +533,17 @@ mod tests {
             fixture.0.join("Documents/MPC Autofill/Decks/My deck.xml")
         );
         assert!(library.folder.is_dir());
+        assert_eq!(
+            library.default_path("Fix later.mpcdeck").await.unwrap(),
+            fixture
+                .0
+                .join("Documents/MPC Autofill/Decks/Fix later.mpcdeck")
+                .to_string_lossy()
+        );
+        assert_eq!(
+            library.default_path("CON.mpcdeck").await.unwrap(),
+            library.folder.join("_CON.mpcdeck").to_string_lossy()
+        );
         for invalid in [
             "../escape.xml",
             "/tmp/escape.xml",
@@ -412,6 +554,25 @@ mod tests {
         }
         let fallback = SavedDecks::new(fixture.0.join("data"), None);
         assert_eq!(fallback.folder, fixture.0.join("data/decks"));
+    }
+
+    #[tokio::test]
+    async fn lists_a_saved_draft_even_when_its_decklist_is_invalid() {
+        let fixture = Fixture::new();
+        let path = fixture
+            .0
+            .join("Documents/MPC Autofill/Decks/Fix later.mpcdeck");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            r#"{"version":1,"text":"0 Island","name":"Fix later","stock":"S30","foil":false,"choices":{},"common_back":null}"#,
+        )
+        .unwrap();
+        let listing = fixture.library().list().await.unwrap();
+        assert_eq!(listing.decks.len(), 1);
+        assert!(listing.decks[0].draft);
+        assert_eq!(listing.decks[0].name, "Fix later");
+        assert_eq!(listing.decks[0].quantity, 0);
     }
 
     #[tokio::test]

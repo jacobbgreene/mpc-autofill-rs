@@ -6,6 +6,7 @@
 
 mod artwork;
 mod artwork_thumbnail;
+mod draft;
 mod files;
 mod saved_decks;
 mod session;
@@ -15,6 +16,7 @@ use std::time::Duration;
 
 use autofill_core::decklist::{ArtworkSelection, DecklistPreview};
 use autofill_core::new_order::NewOrderOptions;
+use draft::DeckDraft;
 use session::{Command, OrderSummary};
 use tauri::{Manager, State};
 use tokio::sync::{mpsc, oneshot};
@@ -131,6 +133,21 @@ async fn save_order(
 }
 
 #[tauri::command]
+async fn save_draft(
+    state: State<'_, AppState>,
+    draft: DeckDraft,
+    path: String,
+) -> Result<OrderSummary, String> {
+    state
+        .request(|reply| Command::SaveDraft {
+            draft,
+            path: PathBuf::from(path),
+            reply,
+        })
+        .await
+}
+
+#[tauri::command]
 async fn read_decklist(path: String) -> Result<String, String> {
     let path = PathBuf::from(path);
     if path
@@ -170,12 +187,14 @@ async fn create_order(
     options: NewOrderOptions,
     text: String,
     selections: Vec<ArtworkSelection>,
+    save_named: bool,
 ) -> Result<OrderSummary, String> {
     state
         .request(|reply| Command::CreateOrder {
             options,
             text,
             selections,
+            save_named,
             reply,
         })
         .await
@@ -186,6 +205,22 @@ async fn create_order(
 /// only be serviced after the current command returns; without a bound, a
 /// stuck operation would make the window un-closable.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
+
+async fn request_shutdown(
+    inbox: &mpsc::Sender<Command>,
+    grace: Duration,
+) -> Result<(), &'static str> {
+    tokio::time::timeout(grace, async {
+        let (reply, response) = oneshot::channel();
+        inbox
+            .send(Command::Shutdown { reply })
+            .await
+            .map_err(|_| "session is no longer running")?;
+        response.await.map_err(|_| "session dropped shutdown")
+    })
+    .await
+    .map_err(|_| "session did not shut down before the exit deadline")?
+}
 
 fn main() {
     tracing_subscriber::fmt()
@@ -208,7 +243,26 @@ fn main() {
             app.manage(AppState { inbox });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load_order, thumbnails, download, fill, get_decklist, preview_decklist, edit_decklist, change_artwork, save_order, read_decklist, preview_new_decklist, create_order, artwork::search_artwork, artwork::artwork_dpi, artwork_thumbnail::artwork_thumbnail, saved_decks::list_saved_decks, saved_decks::default_deck_path])
+        .invoke_handler(tauri::generate_handler![
+            load_order,
+            thumbnails,
+            download,
+            fill,
+            get_decklist,
+            preview_decklist,
+            edit_decklist,
+            change_artwork,
+            save_order,
+            save_draft,
+            read_decklist,
+            preview_new_decklist,
+            create_order,
+            artwork::search_artwork,
+            artwork::artwork_dpi,
+            artwork_thumbnail::artwork_thumbnail,
+            saved_decks::list_saved_decks,
+            saved_decks::default_deck_path
+        ])
         .build(tauri::generate_context!())
         .expect("failed to start MPC Autofill")
         .run(|app, event| {
@@ -216,22 +270,52 @@ fn main() {
             // visible Chrome window. Block briefly until it has torn down.
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 if let Some(state) = app.try_state::<AppState>() {
-                    let (reply, response) = oneshot::channel();
-                    if state.inbox.blocking_send(Command::Shutdown { reply }).is_ok() {
-                        // Wait briefly for a clean browser teardown, then exit
-                        // regardless — a hung command must not pin the window
-                        // open. In that pathological case the live Chrome is
-                        // orphaned; the next launch reaps it (see Driver::launch).
-                        let expired = tauri::async_runtime::block_on(async {
-                            tokio::time::timeout(SHUTDOWN_GRACE, response).await.is_err()
-                        });
-                        if expired {
-                            tracing::warn!(
-                                "session did not shut down within {SHUTDOWN_GRACE:?}; exiting anyway"
-                            );
-                        }
+                    // The same deadline covers a full actor queue and browser
+                    // teardown, so an in-flight command cannot pin exit open.
+                    if let Err(error) = tauri::async_runtime::block_on(request_shutdown(
+                        &state.inbox,
+                        SHUTDOWN_GRACE,
+                    )) {
+                        tracing::warn!("{error}; exiting anyway");
                     }
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn shutdown_deadline_includes_waiting_for_space_in_a_full_queue() {
+        let (inbox, _receiver) = mpsc::channel(1);
+        let (reply, _response) = oneshot::channel();
+        inbox.send(Command::Download { reply }).await.unwrap();
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            request_shutdown(&inbox, Duration::from_millis(10)),
+        )
+        .await
+        .expect("a full queue must not prevent the exit deadline");
+        assert_eq!(
+            result,
+            Err("session did not shut down before the exit deadline")
+        );
+    }
+
+    #[tokio::test]
+    async fn shutdown_waits_for_browser_teardown_acknowledgement() {
+        let (inbox, mut receiver) = mpsc::channel(1);
+        let actor = tokio::spawn(async move {
+            match receiver.recv().await.unwrap() {
+                Command::Shutdown { reply } => reply.send(()).unwrap(),
+                _ => panic!("expected shutdown"),
+            }
+        });
+        request_shutdown(&inbox, Duration::from_secs(1))
+            .await
+            .unwrap();
+        actor.await.unwrap();
+    }
 }

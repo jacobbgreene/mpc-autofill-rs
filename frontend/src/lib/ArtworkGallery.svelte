@@ -2,6 +2,7 @@
   import { createEventDispatcher, onMount, onDestroy } from "svelte";
   import Icon from "./Icon.svelte";
   import ArtworkThumbnail from "./ArtworkThumbnail.svelte";
+  import { favoriteBacks, toggleFavoriteBack } from "./favoriteBacks";
   import {
     ARTWORK_PAGE_SIZE,
     type ArtworkSearch,
@@ -40,6 +41,7 @@
   let generation = 0;
   let failedPreviews = new Set<string>();
   let previewRetry = 0;
+  let favorites = favoriteBacks();
   $: locked = (busy && !loadingMore) || applying;
   $: currentId = selected?.art.drive_id ?? selectedId;
   $: pages = Math.max(1, Math.ceil((results?.count ?? 0) / ARTWORK_PAGE_SIZE));
@@ -213,6 +215,19 @@
           >Retry search</button
         >
       </div>{/if}
+    {#if kind === "cardback" && favorites.length}
+      <div class="favorite-backs">
+        <strong>Favorite backs</strong>
+        <div class="favorite-back-list">
+          {#each favorites as favorite (favorite.art.drive_id)}
+            <button class="button secondary small" disabled={locked}
+              on:click={() => dispatch("choose", favorite)}>
+              {favorite.art.label}{currentId === favorite.art.drive_id ? " · Selected" : ""}
+            </button>
+          {/each}
+        </div>
+      </div>
+    {/if}
     {#if results}
       <p class="editor-help">
         {results.count} options · Choose an image to use it in your deck.
@@ -227,6 +242,7 @@
       <div class="artwork-grid" class:is-loading={busy && !loadingMore}>
         {#each choices as choice (choice.art.drive_id)}
           {@const art = choice.art}
+          <div class="artwork-choice-wrap">
           <button
             class="artwork-choice"
             class:is-selected={currentId === art.drive_id}
@@ -251,6 +267,14 @@
                 : `Use artwork ${choice.index + 1}`}</span
             >
           </button>
+          {#if kind === "cardback"}<button
+              class="favorite-back-toggle"
+              aria-label={`${favorites.some((item) => item.art.drive_id === art.drive_id) ? "Remove" : "Add"} ${art.label} ${favorites.some((item) => item.art.drive_id === art.drive_id) ? "from" : "to"} favorites`}
+              aria-pressed={favorites.some((item) => item.art.drive_id === art.drive_id)}
+              disabled={locked}
+              on:click={() => (favorites = toggleFavoriteBack(choice))}
+            >{favorites.some((item) => item.art.drive_id === art.drive_id) ? "★ Favorite" : "☆ Favorite"}</button>{/if}
+          </div>
         {/each}
       </div>
       {#if !choices.length}<p class="no-artwork">
