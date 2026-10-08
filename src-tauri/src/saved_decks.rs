@@ -534,15 +534,12 @@ mod tests {
         );
         assert!(library.folder.is_dir());
         assert_eq!(
-            library.default_path("Fix later.mpcdeck").await.unwrap(),
-            fixture
-                .0
-                .join("Documents/MPC Autofill/Decks/Fix later.mpcdeck")
-                .to_string_lossy()
+            PathBuf::from(library.default_path("Fix later.mpcdeck").await.unwrap()),
+            library.folder.join("Fix later.mpcdeck")
         );
         assert_eq!(
-            library.default_path("CON.mpcdeck").await.unwrap(),
-            library.folder.join("_CON.mpcdeck").to_string_lossy()
+            PathBuf::from(library.default_path("CON.mpcdeck").await.unwrap()),
+            library.folder.join("_CON.mpcdeck")
         );
         for invalid in [
             "../escape.xml",
