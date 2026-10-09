@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher, onMount, onDestroy, tick } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import { open, save, confirm } from "@tauri-apps/plugin-dialog";
+  import { open, confirm } from "@tauri-apps/plugin-dialog";
   import Icon from "./Icon.svelte";
   import ArtworkCard from "./ArtworkCard.svelte";
   import ArtworkGallery from "./ArtworkGallery.svelte";
@@ -19,7 +19,6 @@
   export let initialName = "New deck";
   export let replacingUnsaved = false;
   export let initialDraft: DeckDraft | null = null;
-  export let draftPath = "";
   const dispatch = createEventDispatcher<{
     close: void;
     applied: OrderSummary;
@@ -194,8 +193,8 @@
     };
   }
   async function apply() {
-    if (!preview || remaining.length || needsBack || busy || loading.size)
-      return;
+    if (busy) return;
+    if (mode === "create" ? !text.trim() : !preview || !!remaining.length || needsBack || !!loading.size) return;
     busy = true;
     error = "";
     try {
@@ -211,10 +210,15 @@
       const summary =
         mode === "create"
           ? await invoke<OrderSummary>("create_order", {
-              text,
-              selections,
-              options: newOrderOptions(),
-              saveNamed: !!orderName.trim(),
+              draft: {
+                version: 1,
+                text,
+                name: effectiveName,
+                stock,
+                foil,
+                choices,
+                common_back: commonBack,
+              } satisfies DeckDraft,
             })
           : await invoke<OrderSummary>("edit_decklist", { text, selections });
       dispatch("applied", summary);
@@ -225,51 +229,6 @@
     }
   }
 
-  async function saveDraft() {
-    if (mode !== "create" || !text.trim() || busy) return;
-    busy = true;
-    error = "";
-    try {
-      if (
-        replacingUnsaved &&
-        !(await confirm(
-          "Save this draft and discard the unsaved changes in your current order?",
-          { title: "Unsaved changes", kind: "warning" },
-        ))
-      )
-        return;
-      let path = draftPath;
-      if (!path) {
-        const fileName = `${effectiveName.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")}.mpcdeck`;
-        let defaultPath = fileName;
-        try {
-          defaultPath = await invoke<string>("default_deck_path", { fileName });
-        } catch {
-          // The picker still permits another user-owned save location.
-        }
-        path = (await save({
-          defaultPath,
-          filters: [{ name: "MPC Autofill draft", extensions: ["mpcdeck"] }],
-        })) ?? "";
-        if (!path) return;
-      }
-      const draft: DeckDraft = {
-        version: 1,
-        text,
-        name: effectiveName,
-        stock,
-        foil,
-        choices,
-        common_back: commonBack,
-      };
-      const summary = await invoke<OrderSummary>("save_draft", { draft, path });
-      dispatch("applied", summary);
-    } catch (e) {
-      error = `Could not save this draft: ${String(e)}`;
-    } finally {
-      busy = false;
-    }
-  }
 </script>
 
 <dialog
@@ -356,7 +315,7 @@
           One card per line: <code>4 Island</code> or <code>4x Island</code>.
           Use <code>Front name // Back name</code> or <code>Front name | Back name</code> for double-faced cards. Blank
           lines and whole-line # or // comments are ignored, as are headings like
-          <code>CREATURES (20)</code>. Maximum 612 cards.
+          <code>CREATURES (20)</code> or <code>Sideboard</code>. Maximum 612 cards.
         </p>
       </div>
     {/if}
@@ -374,7 +333,7 @@
               placeholder={initialName.trim() || "New deck"}
               maxlength="200"
               disabled={busy}
-            /><small>Enter a name to save the deck automatically in Saved decks.</small></label
+            /><small>Saved automatically as XML in Saved decks.</small></label
           >
           <label
             >Cardstock<select bind:value={stock} disabled={busy}>
@@ -454,23 +413,19 @@
   <footer class="editor-footer">
     <span
       ><span role="status"
-        >{!preview
-          ? mode === "create"
-            ? "Save a draft now, even if the decklist needs fixes."
-            : "Your card previews will appear in the next step."
-          : loading.size
-            ? `Finding artwork for ${loading.size} image${loading.size === 1 ? "" : "s"}…`
-            : remaining.length
-              ? mode === "create"
-                ? `${remaining.length} image${remaining.length === 1 ? " needs" : "s need"} artwork. Save a draft to finish later.`
-                : `${remaining.length} image${remaining.length === 1 ? " needs" : "s need"} artwork. Open a gallery to search.`
-              : needsBack
-                ? "Choose a common card back to finish your deck."
-                : mode === "create"
-                  ? orderName.trim()
-                    ? "Ready to create and save your deck in Saved decks."
-                    : "Ready to create. Enter a deck name to save it automatically."
-                  : "Ready to apply. Save your order to keep these changes."}</span
+        >{mode === "create"
+          ? !preview
+            ? "Create deck will save an XML draft if this list needs fixes."
+            : loading.size || remaining.length || needsBack
+              ? "Create deck saves an XML draft. Finish choosing artwork and a back before autofill."
+              : "Ready to create and save this XML deck in Saved decks."
+          : !preview
+            ? "Your card previews will appear in the next step."
+            : loading.size
+              ? `Finding artwork for ${loading.size} image${loading.size === 1 ? "" : "s"}…`
+              : remaining.length
+                ? `${remaining.length} image${remaining.length === 1 ? " needs" : "s need"} artwork. Open a gallery to search.`
+                : "Ready to apply. Save your order to keep these changes."}</span
       >
       {#if needsBack}<button
           class="text-button footer-back-link"
@@ -482,20 +437,22 @@
     <button class="button secondary" disabled={busy} on:click={close}
       >Cancel</button
     >
-    {#if mode === "create"}<button
-        class="button secondary"
+    {#if mode === "create"}
+      {#if !preview}<button
+          class="button secondary"
+          disabled={busy || !text.trim()}
+          on:click={review}>Choose artwork</button
+        >{/if}
+      <button
+        class="button primary"
         disabled={busy || !text.trim()}
-        on:click={saveDraft}>Save draft</button
-      >{/if}
-    {#if preview}<button
+        on:click={apply}>Create deck<Icon name="check" size={16} /></button
+      >
+    {:else if preview}<button
         class="button primary"
         disabled={busy || !!loading.size || !!remaining.length || needsBack}
         on:click={apply}
-        >{busy
-          ? "Applying…"
-          : mode === "create"
-            ? "Create deck"
-            : "Apply changes"}<Icon name="check" size={16} /></button
+        >{busy ? "Applying…" : "Apply changes"}<Icon name="check" size={16} /></button
       >
     {:else}<button
         class="button primary"

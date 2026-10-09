@@ -168,7 +168,7 @@
                   !/\.(xml|txt|mpcdeck)$/i.test(payload.paths[0])
                 ) {
                   orderError =
-                    "Choose one .xml order, .mpcdeck draft, or .txt decklist at a time.";
+                    "Choose one .xml deck or .txt decklist at a time.";
                   return;
                 }
                 void openPath(payload.paths[0]);
@@ -653,7 +653,7 @@
                   ? "Drop your file here"
                   : "Drop a decklist or order here"}
               </h2>
-              <p>Text decklist (.txt), saved draft (.mpcdeck), or MPC Autofill order (.xml)</p>
+              <p>Text decklist (.txt) or saved deck (.xml)</p>
             </div>
             <button
               class="button secondary"
@@ -694,17 +694,17 @@
     {:else}
       {#if summary.draft}
         <section class="draft-review" aria-labelledby="draft-title">
-          <p class="eyebrow">SAVED DRAFT</p>
+          <p class="eyebrow">DECK NEEDS ATTENTION</p>
           <h1 id="draft-title">{summary.name}</h1>
           <p>
-            Your imported decklist is saved. Continue importing to fix its issues and
-            create an order for autofill.
+            This deck is saved as XML. Continue importing to fix its issues;
+            autofill becomes available when the deck is complete.
           </p>
           {#if summary.draft_error}<div class="notice error-notice" role="alert">
               <Icon name="warning" />
               <p>{summary.draft_error}</p>
             </div>{:else}<p class="notice" role="status">
-              This draft is ready to create. Continue import to review it.
+              This deck is ready to finish. Continue import to review it.
             </p>{/if}
           <div class="draft-actions">
             <button
@@ -914,7 +914,7 @@
 
 {#if dragging && summary}<div class="drop-overlay" role="status">
     <Icon name="import" size={40} />
-    <h2>Drop a .txt decklist, .mpcdeck draft, or .xml order</h2>
+    <h2>Drop a .txt decklist or .xml deck</h2>
     <p>{summary.draft
         ? "Text lists start a new deck; saved drafts can be resumed."
         : "Text lists replace the open deck and can reuse its artwork; saved drafts can be resumed."}</p>
@@ -938,7 +938,6 @@
     initialText={editorMode !== "edit" && !resumeDraft ? draftText : ""}
     initialName={resumeDraft && summary ? summary.name : draftName}
     initialDraft={editorMode === "create" && resumeDraft ? summary?.draft ?? null : null}
-    draftPath={editorMode === "create" && resumeDraft && summary?.draft ? summary.path : ""}
     replacingUnsaved={summary?.dirty ?? false}
     on:close={() => (editorMode = null)}
     on:applied={(event) => applyEditedOrder(event.detail)}

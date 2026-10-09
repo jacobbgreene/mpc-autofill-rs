@@ -52,7 +52,7 @@ installation; the Linux AppImage is extracted and started on a private display.
 These checks do not exercise a signed-in MakePlayingCards upload.
 
 Push a tag matching the versions in `Cargo.toml`, `src-tauri/tauri.conf.json`, and
-`frontend/package.json` (for example, `v0.1.3`). Both platforms must pass before
+`frontend/package.json` (for example, `v0.1.4`). Both platforms must pass before
 the workflow creates a draft preview release with installers and SHA-256
 checksums. Review the assets and publish the draft to share it. A manual workflow
 run on a branch builds downloadable workflow artifacts without creating a release.
@@ -165,17 +165,15 @@ you can still choose another back before creating it.
 The appearance selector in the top bar offers **Light**, **Dark**, and **System**.
 Your choice is remembered between sessions; **System** follows your device theme.
 
-**Save draft** is available throughout import, including when the decklist has a
-syntax error, artwork is missing, or no common back has been chosen. It saves the
-raw list, print settings, and selected artwork to a `.mpcdeck` file and opens a
-draft review screen. Drafts appear in **Saved decks**; open one and select
-**Continue import** to make fixes later. Drafts cannot start autofill until you
-finish importing them. **Create deck** opens a completed order in the card
-library. If you typed a deck name, its XML is saved automatically in Saved
-decks, with a numbered filename when the name is already in use. Otherwise,
-the first **Save** asks where to write its XML. The saved draft remains
-available separately, and the imported text file stays unchanged. The welcome
-screen can open `.xml`, `.txt`, and `.mpcdeck` files.
+**Create deck** saves the import as XML in **Saved decks**, with a numbered
+filename when the name is already in use. If the decklist has a syntax error,
+artwork is missing, or no common back has been chosen, the XML holds an
+unfinished deck with the raw list, print settings, and artwork choices. Open it
+and select **Continue import** to fix the issues later. Autofill is unavailable
+until the deck is complete. Creating it again after the fixes replaces the same
+XML file with a completed order. The imported text file stays unchanged. The
+welcome screen opens `.xml` decks and `.txt` lists; older `.mpcdeck` drafts can
+still be opened and saved as XML.
 
 Open or drop an order XML to browse its cards. Search by name, show all cards,
 backs, or images needing attention, and click a card for a larger preview.
@@ -206,7 +204,7 @@ inside the same order. Both accept pasted text or an imported `.txt` file:
 
 Use one card per line with an optional quantity (`4` or `4x`). Blank lines and
 lines beginning with `#` or `//` are ignored, along with category headings such
-as `COMMANDER (1)` and `CREATURES (20)`. `Front name // Back name` or
+as `COMMANDER (1)`, `CREATURES (20)`, and `Sideboard`. `Front name // Back name` or
 `Front name | Back name` specifies
 a custom reverse. Existing artwork and back pairings are retained; new names
 must have artwork chosen from the MPC Autofill search results before changes can

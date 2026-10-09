@@ -125,15 +125,18 @@ fn resolve(
 }
 
 fn is_section_heading(line: &str) -> bool {
-    let Some((section, count)) = line.split_once('(') else {
-        return false;
+    let line = line.trim().trim_end_matches(':').trim();
+    let section = if let Some((section, count)) = line.split_once('(') {
+        let Some(count) = count.strip_suffix(')') else {
+            return false;
+        };
+        if count.trim().parse::<u32>().is_err() {
+            return false;
+        }
+        section.trim()
+    } else {
+        line
     };
-    let Some(count) = count.strip_suffix(')') else {
-        return false;
-    };
-    if count.trim().parse::<u32>().is_err() {
-        return false;
-    }
     matches!(
         section.trim().to_ascii_lowercase().as_str(),
         "commander"
@@ -443,11 +446,24 @@ mod tests {
             "1 Lands (35)",
             "Creature Swap",
             "Mystery Category (2)",
+            "1 Sideboard",
         ] {
             assert!(!is_section_heading(text));
         }
         assert!(is_section_heading("Creatures (20)"));
         assert!(is_section_heading("COMMANDER (1)"));
+        assert!(is_section_heading("Sideboard"));
+        assert!(is_section_heading("SIDEBOARD:"));
+        assert!(is_section_heading("Sideboard (15)"));
+    }
+
+    #[test]
+    fn bare_sideboard_heading_is_not_a_card_or_artwork_request() {
+        let preview = order()
+            .preview_decklist("Sideboard\n1 Island\nSIDEBOARD:\n1 Delver", &[])
+            .unwrap();
+        assert_eq!(preview.quantity, 2);
+        assert!(preview.unresolved.is_empty());
     }
 
     #[test]

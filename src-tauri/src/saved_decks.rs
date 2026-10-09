@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use tokio::sync::Mutex;
 
-use crate::draft;
+use crate::draft::{self, DeckDraft};
 use crate::files::{write_atomic, write_new};
 
 pub struct SavedDecks {
@@ -76,10 +76,19 @@ impl SavedDecks {
     }
 
     pub async fn save_new_order(&self, order: &Order) -> Result<PathBuf, String> {
+        self.save_new_xml(&order.name, order.to_xml().map_err(|e| e.to_string())?)
+            .await
+    }
+
+    pub async fn save_new_draft(&self, draft: &DeckDraft) -> Result<PathBuf, String> {
+        self.save_new_xml(&draft.name, draft::encode_xml(draft)?)
+            .await
+    }
+
+    async fn save_new_xml(&self, name: &str, xml: String) -> Result<PathBuf, String> {
         let _guard = self.gate.lock().await;
         let folder = self.folder.clone();
-        let stem = safe_file_stem(&order.name);
-        let xml = order.to_xml().map_err(|e| e.to_string())?;
+        let stem = safe_file_stem(name);
         tokio::task::spawn_blocking(move || {
             std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
             for number in 1..=10_000 {
@@ -117,7 +126,7 @@ impl SavedDecks {
             || file_name.contains(['/', '\\'])
             || !is_deck_file(Path::new(file_name))
         {
-            return Err("choose an XML order or .mpcdeck filename without a directory".into());
+            return Err("choose an XML deck filename without a directory".into());
         }
         tokio::fs::create_dir_all(&self.folder)
             .await
@@ -193,7 +202,7 @@ fn is_xml(path: &Path) -> bool {
 }
 
 fn is_deck_file(path: &Path) -> bool {
-    is_xml(path) || draft::is_draft(path)
+    is_xml(path) || draft::is_legacy_draft(path)
 }
 
 fn read_index(path: &Path) -> Result<Index, String> {
@@ -237,8 +246,8 @@ fn describe(path: &Path) -> Result<SavedDeck, String> {
     if !metadata.is_file() || metadata.len() > 8 * 1024 * 1024 {
         return Err("not an order file under 8 MB".into());
     }
-    let (name, quantity, stock, foil, preview_id, is_draft) = if draft::is_draft(&path) {
-        let saved = draft::read(&path)?;
+    let saved_draft = draft::read_if_draft(&path)?;
+    let (name, quantity, stock, foil, preview_id, is_draft) = if let Some(saved) = saved_draft {
         let (quantity, _) = saved.preview();
         (
             saved.name,
@@ -534,12 +543,12 @@ mod tests {
         );
         assert!(library.folder.is_dir());
         assert_eq!(
-            PathBuf::from(library.default_path("Fix later.mpcdeck").await.unwrap()),
-            library.folder.join("Fix later.mpcdeck")
+            PathBuf::from(library.default_path("Fix later.xml").await.unwrap()),
+            library.folder.join("Fix later.xml")
         );
         assert_eq!(
-            PathBuf::from(library.default_path("CON.mpcdeck").await.unwrap()),
-            library.folder.join("_CON.mpcdeck")
+            PathBuf::from(library.default_path("CON.xml").await.unwrap()),
+            library.folder.join("_CON.xml")
         );
         for invalid in [
             "../escape.xml",
@@ -554,22 +563,59 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lists_a_saved_draft_even_when_its_decklist_is_invalid() {
+    async fn unfinished_xml_decks_are_listed_and_can_become_orders_at_the_same_path() {
         let fixture = Fixture::new();
-        let path = fixture
-            .0
-            .join("Documents/MPC Autofill/Decks/Fix later.mpcdeck");
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(
-            &path,
-            r#"{"version":1,"text":"0 Island","name":"Fix later","stock":"S30","foil":false,"choices":{},"common_back":null}"#,
-        )
-        .unwrap();
-        let listing = fixture.library().list().await.unwrap();
+        let library = fixture.library();
+        let mut draft = DeckDraft {
+            version: 1,
+            text: "Sideboard\n0 Island".into(),
+            name: "Fix later".into(),
+            stock: autofill_core::Cardstock::S30,
+            foil: false,
+            choices: std::collections::HashMap::new(),
+            common_back: None,
+        };
+        let path = library.save_new_draft(&draft).await.unwrap();
+        assert_eq!(path.extension().unwrap(), "xml");
+        let listing = library.list().await.unwrap();
         assert_eq!(listing.decks.len(), 1);
         assert!(listing.decks[0].draft);
         assert_eq!(listing.decks[0].name, "Fix later");
         assert_eq!(listing.decks[0].quantity, 0);
+        assert_eq!(
+            draft::read_if_draft(&path).unwrap().unwrap().text,
+            draft.text
+        );
+
+        let choice = |drive_id: &str, name: &str| draft::DraftChoice {
+            art: draft::DraftArt {
+                drive_id: drive_id.into(),
+                name: format!("{name}.png"),
+                label: name.into(),
+                source: String::new(),
+                dpi: 0,
+                thumb: String::new(),
+            },
+            query: name.into(),
+            index: 0,
+            count: 1,
+        };
+        draft.text = "Sideboard\n1 Island".into();
+        draft.choices.insert(
+            "[\"island\",\"front\"]".into(),
+            choice("front-art", "Island"),
+        );
+        draft.common_back = Some(choice("back-art", "Back"));
+        let order = draft
+            .options()
+            .create(&draft.text, &draft.selections())
+            .unwrap();
+        write_atomic(&path, &order.to_xml().unwrap()).unwrap();
+        assert!(draft::read_if_draft(&path).unwrap().is_none());
+        let listing = library.list().await.unwrap();
+        assert_eq!(listing.decks.len(), 1);
+        assert!(!listing.decks[0].draft);
+        assert_eq!(listing.decks[0].quantity, 1);
     }
 
     #[tokio::test]

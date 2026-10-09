@@ -1,14 +1,15 @@
-//! An unfinished text import is kept separately from a MakePlayingCards order.
-//! This preserves malformed lines and artwork choices without inventing image IDs.
+//! An unfinished import is an XML deck draft, separate from a complete MPC order.
+//! It preserves malformed lines and artwork choices without inventing image IDs.
 use std::collections::HashMap;
 use std::path::Path;
 
 use autofill_core::decklist::ArtworkSelection;
 use autofill_core::new_order::{CardbackSelection, NewOrderOptions};
 use autofill_core::Cardstock;
+use quick_xml::events::Event;
 use serde::{Deserialize, Serialize};
 
-pub const EXTENSION: &str = "mpcdeck";
+pub const LEGACY_EXTENSION: &str = "mpcdeck";
 const MAX_BYTES: u64 = 1_500_000;
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -52,11 +53,8 @@ impl DeckDraft {
         if self.text.trim().is_empty() || self.text.len() > 1_000_000 {
             return Err("enter a decklist under 1 MB before saving a draft".into());
         }
-        if self.name.trim().is_empty() || self.name.len() > 200 {
+        if self.name.trim().is_empty() || self.name.chars().count() > 200 {
             return Err("enter a deck name of 1–200 characters".into());
-        }
-        if self.stock == Cardstock::P10 && self.foil {
-            return Err("plastic cardstock cannot be foil".into());
         }
         if self.choices.len() > 1_224 {
             return Err("too many artwork choices in deck draft".into());
@@ -77,19 +75,7 @@ impl DeckDraft {
     }
 
     pub fn preview(&self) -> (u32, Option<String>) {
-        let selections: Vec<_> = self
-            .choices
-            .iter()
-            .filter_map(|(key, choice)| {
-                let (query, face): (String, String) = serde_json::from_str(key).ok()?;
-                Some(ArtworkSelection {
-                    query,
-                    face,
-                    drive_id: choice.art.drive_id.clone(),
-                    name: choice.art.name.clone(),
-                })
-            })
-            .collect();
+        let selections = self.selections();
         match self.options().preview(&self.text, &selections) {
             Ok(preview) => {
                 let mut issues = Vec::new();
@@ -118,32 +104,148 @@ impl DeckDraft {
             Err(error) => (0, Some(error.to_string())),
         }
     }
+
+    pub fn selections(&self) -> Vec<ArtworkSelection> {
+        self.choices
+            .iter()
+            .filter_map(|(key, choice)| {
+                let (query, face): (String, String) = serde_json::from_str(key).ok()?;
+                Some(ArtworkSelection {
+                    query,
+                    face,
+                    drive_id: choice.art.drive_id.clone(),
+                    name: choice.art.name.clone(),
+                })
+            })
+            .collect()
+    }
 }
 
-pub fn is_draft(path: &Path) -> bool {
+#[derive(Deserialize, Serialize)]
+#[serde(rename = "deckDraft")]
+struct XmlDraft {
+    version: u8,
+    name: String,
+    stock: Cardstock,
+    foil: bool,
+    text: String,
+    #[serde(default)]
+    choices: XmlChoices,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    common_back: Option<DraftChoice>,
+}
+
+#[derive(Default, Deserialize, Serialize)]
+struct XmlChoices {
+    #[serde(default, rename = "choice")]
+    entries: Vec<XmlChoice>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct XmlChoice {
+    key: String,
+    value: DraftChoice,
+}
+
+pub fn is_legacy_draft(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case(EXTENSION))
+        .is_some_and(|extension| extension.eq_ignore_ascii_case(LEGACY_EXTENSION))
 }
 
-pub fn read(path: &Path) -> Result<DeckDraft, String> {
-    let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
-    if !metadata.is_file() || metadata.len() > MAX_BYTES {
-        return Err("choose a deck draft under 1.5 MB".into());
+pub fn is_xml_draft(xml: &str) -> bool {
+    let mut reader = quick_xml::Reader::from_str(xml);
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(tag) | Event::Empty(tag)) => {
+                return tag.name().as_ref() == b"deckDraft"
+            }
+            Ok(Event::Eof) | Err(_) => return false,
+            _ => {}
+        }
     }
-    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let draft: DeckDraft = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+}
+
+pub fn decode_xml(xml: &str) -> Result<DeckDraft, String> {
+    if !is_xml_draft(xml) {
+        return Err("not an XML deck draft".into());
+    }
+    let saved: XmlDraft = quick_xml::de::from_str(xml).map_err(|e| e.to_string())?;
+    let draft = DeckDraft {
+        version: saved.version,
+        name: saved.name,
+        stock: saved.stock,
+        foil: saved.foil,
+        text: saved.text,
+        choices: saved
+            .choices
+            .entries
+            .into_iter()
+            .map(|entry| (entry.key, entry.value))
+            .collect(),
+        common_back: saved.common_back,
+    };
     draft.validate()?;
     Ok(draft)
 }
 
-pub fn encode(draft: &DeckDraft) -> Result<String, String> {
+pub fn encode_xml(draft: &DeckDraft) -> Result<String, String> {
     draft.validate()?;
-    let text = serde_json::to_string_pretty(draft).map_err(|e| e.to_string())?;
-    if text.len() as u64 > MAX_BYTES {
+    let mut entries: Vec<_> = draft
+        .choices
+        .iter()
+        .map(|(key, value)| XmlChoice {
+            key: key.clone(),
+            value: value.clone(),
+        })
+        .collect();
+    entries.sort_by(|a, b| a.key.cmp(&b.key));
+    let saved = XmlDraft {
+        version: draft.version,
+        name: draft.name.clone(),
+        stock: draft.stock,
+        foil: draft.foil,
+        text: draft.text.clone(),
+        choices: XmlChoices { entries },
+        common_back: draft.common_back.clone(),
+    };
+    let xml = quick_xml::se::to_string(&saved).map_err(|e| e.to_string())?;
+    let xml = format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n{xml}\n");
+    if xml.len() as u64 > MAX_BYTES {
         return Err("deck draft is too large to save".into());
     }
-    Ok(text)
+    Ok(xml)
+}
+
+pub fn read_if_draft(path: &Path) -> Result<Option<DeckDraft>, String> {
+    if !is_legacy_draft(path)
+        && !path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("xml"))
+    {
+        return Ok(None);
+    }
+    let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
+    if !metadata.is_file() {
+        return Err("choose a deck file".into());
+    }
+    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    if is_legacy_draft(path) {
+        if metadata.len() > MAX_BYTES {
+            return Err("choose a deck draft under 1.5 MB".into());
+        }
+        let draft: DeckDraft = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+        draft.validate()?;
+        return Ok(Some(draft));
+    }
+    if !is_xml_draft(&text) {
+        return Ok(None);
+    }
+    if metadata.len() > MAX_BYTES {
+        return Err("choose a deck draft under 1.5 MB".into());
+    }
+    Ok(Some(decode_xml(&text)?))
 }
 
 #[cfg(test)]
@@ -152,29 +254,27 @@ mod tests {
 
     #[test]
     fn malformed_decklist_and_artwork_choices_survive_a_draft_round_trip() {
+        let selected = DraftChoice {
+            art: DraftArt {
+                drive_id: "mountain-id".into(),
+                name: "Mountain.png".into(),
+                label: "Mountain".into(),
+                source: "MPC Autofill".into(),
+                dpi: 800,
+                thumb: String::new(),
+            },
+            query: "Mountain".into(),
+            index: 0,
+            count: 3,
+        };
         let draft = DeckDraft {
             version: 1,
-            text: "0 Island\n2 Mountain".into(),
-            name: "To fix".into(),
+            text: "0 Island\n2 Mountain & Forest".into(),
+            name: "To <fix> & finish".into(),
             stock: Cardstock::S30,
             foil: false,
-            choices: HashMap::from([(
-                "[\"mountain\",\"front\"]".into(),
-                DraftChoice {
-                    art: DraftArt {
-                        drive_id: "mountain-id".into(),
-                        name: "Mountain.png".into(),
-                        label: "Mountain".into(),
-                        source: "MPC Autofill".into(),
-                        dpi: 800,
-                        thumb: String::new(),
-                    },
-                    query: "Mountain".into(),
-                    index: 0,
-                    count: 3,
-                },
-            )]),
-            common_back: None,
+            choices: HashMap::from([("[\"mountain\",\"front\"]".into(), selected.clone())]),
+            common_back: Some(selected),
         };
         assert!(draft.preview().1.is_some());
         let stamp = std::time::SystemTime::now()
@@ -182,9 +282,13 @@ mod tests {
             .unwrap()
             .as_nanos();
         let path =
-            std::env::temp_dir().join(format!("mpc-draft-{}-{stamp}.mpcdeck", std::process::id()));
-        std::fs::write(&path, encode(&draft).unwrap()).unwrap();
-        let restored = read(&path).unwrap();
+            std::env::temp_dir().join(format!("mpc-draft-{}-{stamp}.xml", std::process::id()));
+        let xml = encode_xml(&draft).unwrap();
+        assert!(is_xml_draft(&xml));
+        assert!(xml.contains("To &lt;fix&gt; &amp; finish"));
+        assert!(!is_xml_draft("<order><details/></order>"));
+        std::fs::write(&path, xml).unwrap();
+        let restored = read_if_draft(&path).unwrap().unwrap();
         std::fs::remove_file(path).unwrap();
         assert_eq!(restored.text, draft.text);
         assert_eq!(restored.choices.len(), 1);
@@ -192,7 +296,29 @@ mod tests {
             restored.choices["[\"mountain\",\"front\"]"].art.drive_id,
             "mountain-id"
         );
+        assert_eq!(
+            restored.common_back.as_ref().unwrap().art.drive_id,
+            "mountain-id"
+        );
         assert!(restored.preview().1.is_some());
+    }
+
+    #[test]
+    fn older_json_drafts_can_still_be_opened() {
+        let draft = DeckDraft {
+            version: 1,
+            text: "0 Island".into(),
+            name: "Older draft".into(),
+            stock: Cardstock::S30,
+            foil: false,
+            choices: HashMap::new(),
+            common_back: None,
+        };
+        let path =
+            std::env::temp_dir().join(format!("mpc-legacy-draft-{}.mpcdeck", std::process::id()));
+        std::fs::write(&path, serde_json::to_string(&draft).unwrap()).unwrap();
+        assert_eq!(read_if_draft(&path).unwrap().unwrap().text, draft.text);
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

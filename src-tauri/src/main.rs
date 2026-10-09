@@ -133,21 +133,6 @@ async fn save_order(
 }
 
 #[tauri::command]
-async fn save_draft(
-    state: State<'_, AppState>,
-    draft: DeckDraft,
-    path: String,
-) -> Result<OrderSummary, String> {
-    state
-        .request(|reply| Command::SaveDraft {
-            draft,
-            path: PathBuf::from(path),
-            reply,
-        })
-        .await
-}
-
-#[tauri::command]
 async fn read_decklist(path: String) -> Result<String, String> {
     let path = PathBuf::from(path);
     if path
@@ -184,19 +169,10 @@ fn preview_new_decklist(
 #[tauri::command]
 async fn create_order(
     state: State<'_, AppState>,
-    options: NewOrderOptions,
-    text: String,
-    selections: Vec<ArtworkSelection>,
-    save_named: bool,
+    draft: DeckDraft,
 ) -> Result<OrderSummary, String> {
     state
-        .request(|reply| Command::CreateOrder {
-            options,
-            text,
-            selections,
-            save_named,
-            reply,
-        })
+        .request(|reply| Command::CreateOrder { draft, reply })
         .await
 }
 
@@ -253,7 +229,6 @@ fn main() {
             edit_decklist,
             change_artwork,
             save_order,
-            save_draft,
             read_decklist,
             preview_new_decklist,
             create_order,

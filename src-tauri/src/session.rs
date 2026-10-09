@@ -8,7 +8,6 @@ use std::path::PathBuf;
 
 use autofill_automation::{Driver, Error as AutomationError, ImageMode};
 use autofill_core::decklist::{ArtworkSelection, DecklistPreview};
-use autofill_core::new_order::NewOrderOptions;
 use autofill_core::{download, DownloadJob, DownloadOutcome, Face, Order, PostProcess, Source};
 use futures::stream::{self, StreamExt};
 use serde::Serialize;
@@ -34,10 +33,7 @@ pub enum Command {
         reply: Reply<()>,
     },
     CreateOrder {
-        options: NewOrderOptions,
-        text: String,
-        selections: Vec<ArtworkSelection>,
-        save_named: bool,
+        draft: DeckDraft,
         reply: Reply<OrderSummary>,
     },
     GetDecklist {
@@ -60,11 +56,6 @@ pub enum Command {
     },
     SaveOrder {
         path: Option<PathBuf>,
-        reply: Reply<OrderSummary>,
-    },
-    SaveDraft {
-        draft: DeckDraft,
-        path: PathBuf,
         reply: Reply<OrderSummary>,
     },
     Download {
@@ -141,18 +132,8 @@ pub async fn run(mut inbox: mpsc::Receiver<Command>, app: AppHandle) {
                 session.spawn_thumbnail_fetch();
                 let _ = reply.send(Ok(()));
             }
-            Command::CreateOrder {
-                options,
-                text,
-                selections,
-                save_named,
-                reply,
-            } => {
-                let _ = reply.send(
-                    session
-                        .create_order(&options, &text, &selections, save_named)
-                        .await,
-                );
+            Command::CreateOrder { draft, reply } => {
+                let _ = reply.send(session.create_order(draft).await);
             }
             Command::GetDecklist { reply } => {
                 let _ = reply.send(
@@ -196,9 +177,6 @@ pub async fn run(mut inbox: mpsc::Receiver<Command>, app: AppHandle) {
             }
             Command::SaveOrder { path, reply } => {
                 let _ = reply.send(session.save_order(path).await);
-            }
-            Command::SaveDraft { draft, path, reply } => {
-                let _ = reply.send(session.save_draft(draft, path).await);
             }
             Command::Download { reply } => {
                 let _ = reply.send(session.download().await);
@@ -244,13 +222,13 @@ impl Session {
     }
 
     async fn load_order(&mut self, path: PathBuf) -> Result<OrderSummary, String> {
-        if draft::is_draft(&path) {
-            let loaded = tokio::task::spawn_blocking({
-                let path = path.clone();
-                move || draft::read(&path)
-            })
-            .await
-            .map_err(|e| e.to_string())??;
+        let loaded = tokio::task::spawn_blocking({
+            let path = path.clone();
+            move || draft::read_if_draft(&path)
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+        if let Some(loaded) = loaded {
             self.order = None;
             self.draft = Some(loaded);
             self.order_path = path;
@@ -338,17 +316,12 @@ impl Session {
         Ok(summary)
     }
 
-    async fn create_order(
-        &mut self,
-        options: &NewOrderOptions,
-        text: &str,
-        selections: &[ArtworkSelection],
-        save_named: bool,
-    ) -> Result<OrderSummary, String> {
-        // Resolve and validate the complete draft before replacing a loaded order.
-        let order = options
-            .create(text, selections)
-            .map_err(|e| e.to_string())?;
+    async fn create_order(&mut self, draft: DeckDraft) -> Result<OrderSummary, String> {
+        draft.validate()?;
+        let order = match draft.options().create(&draft.text, &draft.selections()) {
+            Ok(order) => order,
+            Err(_) => return self.save_incomplete_deck(draft).await,
+        };
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|e| e.to_string())?
@@ -365,20 +338,59 @@ impl Session {
             .asset_protocol_scope()
             .allow_directory(&cards_dir, true)
             .map_err(|e| e.to_string())?;
-        let path = if save_named {
+        let path = if let Some(path) = self.current_xml_draft_path() {
+            let xml = order.to_xml().map_err(|e| e.to_string())?;
+            let dest = path.clone();
+            tokio::task::spawn_blocking(move || write_atomic(&dest, &xml))
+                .await
+                .map_err(|e| e.to_string())??;
+            path
+        } else {
             self.app
                 .state::<SavedDecks>()
                 .save_new_order(&order)
                 .await?
-        } else {
-            PathBuf::new()
         };
         self.cards_dir = cards_dir;
         self.order_path = path;
         self.downloaded.clear();
-        self.dirty = !save_named;
+        self.dirty = false;
         self.order = Some(order);
         self.draft = None;
+        self.remember_order().await;
+        self.summary()
+    }
+
+    fn current_xml_draft_path(&self) -> Option<PathBuf> {
+        (self.draft.is_some()
+            && self
+                .order_path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("xml")))
+        .then(|| self.order_path.clone())
+    }
+
+    async fn save_incomplete_deck(&mut self, draft: DeckDraft) -> Result<OrderSummary, String> {
+        let path = if let Some(path) = self.current_xml_draft_path() {
+            let xml = draft::encode_xml(&draft)?;
+            let dest = path.clone();
+            tokio::task::spawn_blocking(move || write_atomic(&dest, &xml))
+                .await
+                .map_err(|e| e.to_string())??;
+            path
+        } else {
+            self.app
+                .state::<SavedDecks>()
+                .save_new_draft(&draft)
+                .await?
+        };
+        self.order = None;
+        self.draft = Some(draft);
+        self.order_path = path;
+        self.dirty = false;
+        self.downloaded.clear();
+        self.remember_order().await;
         self.summary()
     }
 
@@ -439,28 +451,6 @@ impl Session {
             .map_err(|e| e.to_string())??;
         self.order_path = path;
         self.dirty = false;
-        self.remember_order().await;
-        self.summary()
-    }
-
-    async fn save_draft(
-        &mut self,
-        draft: DeckDraft,
-        path: PathBuf,
-    ) -> Result<OrderSummary, String> {
-        if !draft::is_draft(&path) {
-            return Err("save the draft with an .mpcdeck extension".into());
-        }
-        let encoded = draft::encode(&draft)?;
-        let dest = path.clone();
-        tokio::task::spawn_blocking(move || write_atomic(&dest, &encoded))
-            .await
-            .map_err(|e| e.to_string())??;
-        self.order = None;
-        self.draft = Some(draft);
-        self.order_path = path;
-        self.dirty = false;
-        self.downloaded.clear();
         self.remember_order().await;
         self.summary()
     }
