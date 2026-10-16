@@ -1,15 +1,31 @@
 # MPC Autofill (Rust)
 
 A Rust/Tauri desktop app that auto-fills a card order into the MakePlayingCards
-project editor. It imports a text decklist or an order XML, downloads the card images, and drives a
-visible Chrome via the Chrome DevTools Protocol to build the project — all from a
-single window.
+project editor. It imports a text decklist or an order XML, downloads the card
+images, and drives a visible Chrome via the Chrome DevTools Protocol to build the
+project — all from a single window.
+
+## Screenshots
+
+Review your deck, card quantities, print stock, and common card back before
+starting autofill. These screenshots show v0.1.4 with a sample deck; the overview
+uses the dark theme.
+
+![Deck overview in the dark theme, showing six cards, their quantities and artwork resolution, and the autofill controls.](docs/screenshots/deck-overview.png)
+
+| Import a deck | Choose artwork |
+| --- | --- |
+| [![Welcome screen in the light theme, with options to paste a decklist or open an order XML.](docs/screenshots/welcome.png)](docs/screenshots/welcome.png) | [![Artwork chooser showing alternate Lightning Bolt designs with source names and DPI.](docs/screenshots/artwork-gallery.png)](docs/screenshots/artwork-gallery.png) |
+| Paste a decklist or open an existing order XML. | Browse alternate designs and compare their resolution. |
+
+Click either thumbnail to view it at full size.
 
 ## Installing a release
 
 Download the package for your computer from
 [GitHub Releases](https://github.com/jacobbgreene/mpc-autofill-rs/releases).
-These initial preview builds target 64-bit Intel/AMD computers:
+The current preview is [v0.1.4](https://github.com/jacobbgreene/mpc-autofill-rs/releases/tag/v0.1.4).
+The packaged builds target 64-bit Intel/AMD computers:
 
 - **Windows 10/11:** run the `-setup.exe` installer. It installs WebView2 if
   necessary. The installer is currently unsigned.
@@ -24,10 +40,20 @@ uses its own browser profile, so your normal browser login is separate.
 The repository is private: download links require repository access, or the
 owner can send you the installer file directly.
 
+## Quick start
+
+1. Choose **Import .txt decklist** or **Paste a decklist**. For pasted text, select
+   **Choose artwork**, then review the images and choose a common card back.
+   Use **Open deck…** for an existing XML deck.
+2. Select **Create deck** to save it in **Saved decks**. Incomplete imports are
+   saved too; use **Continue import** to finish them before running autofill.
+3. Select **Start autofill**, sign in when Chrome prompts you, and review the
+   completed project in Chrome. Saving to your MPC account and checkout are manual.
+
 ## Choosing the browser
 
 Set `CHROME` to the full path of your preferred browser before starting the app.
-On this NixOS installation, build and launch with Google Chrome using:
+For example, on NixOS with Google Chrome installed:
 
 ```sh
 nix build .#default
@@ -51,8 +77,9 @@ checks that the packaged applications start. Windows is tested after a silent
 installation; the Linux AppImage is extracted and started on a private display.
 These checks do not exercise a signed-in MakePlayingCards upload.
 
-Push a tag matching the versions in `Cargo.toml`, `src-tauri/tauri.conf.json`, and
-`frontend/package.json` (for example, `v0.1.4`). Both platforms must pass before
+Keep the versions in `Cargo.toml`, `src-tauri/tauri.conf.json`,
+`frontend/package.json`, and `flake.nix` in sync, then push a matching tag
+(for example, `v0.1.4`). Both platforms must pass before
 the workflow creates a draft preview release with installers and SHA-256
 checksums. Review the assets and publish the draft to share it. A manual workflow
 run on a branch builds downloadable workflow artifacts without creating a release.
@@ -70,7 +97,8 @@ tauri build --bundles appimage,deb -- --locked  # Linux
 ```
 
 The icon uses the same card symbol as the application header. Regenerate its
-platform variants with `cargo-tauri icon src-tauri/icons/icon.svg`.
+platform variants with `tauri icon src-tauri/icons/icon.svg`, or use
+`cargo-tauri icon src-tauri/icons/icon.svg` inside the Nix development shell.
 
 This is a from-scratch reimagining of the reference Python desktop tool, focused
 on a smoother, one-window experience.
@@ -85,25 +113,38 @@ on a smoother, one-window experience.
   downloaded images, and the browser; the UI talks to it over a channel.
 - `frontend` — the Svelte + Vite UI.
 
-## Developing (NixOS)
+## Developing on Windows and Linux
+
+Install Rust, Node 22.6+, and
+[Tauri's platform prerequisites](https://v2.tauri.app/start/prerequisites/), then
+run these commands from the repository root:
+
+```sh
+npm --prefix frontend ci
+npm install --global @tauri-apps/cli@2.11.4
+tauri dev
+```
+
+The Tauri CLI starts the Vite development server automatically. Install Chrome
+or Chromium as well to exercise autofill.
+
+## Developing on NixOS
 
 The flake provides a NixOS-patched Rust toolchain plus Tauri's native
 dependencies and a Chromium for automation.
 
 ```sh
 # Fast shell for the logic crates (no WebKitGTK):
-nix develop .#core --command cargo test
+nix develop .#core --command cargo test -p autofill-core -p autofill-automation --locked
 
 # Full shell for the app (first time: install the frontend deps):
 nix develop
-npm --prefix frontend install
+npm --prefix frontend ci
 cargo-tauri dev
 ```
 
-Note the **hyphen** in `cargo-tauri dev`. Use it instead of `cargo tauri dev`:
-cargo resolves the `tauri` subcommand from `~/.cargo/bin`, which on this machine
-holds a non-NixOS binary that won't run; the hyphenated form uses the flake's
-Tauri CLI directly.
+Use the **hyphenated** `cargo-tauri dev` command inside the shell to invoke the
+flake's Nix-compatible Tauri CLI directly.
 
 `nix develop` exports `CHROME` so the driver launches the flake's Chromium.
 
@@ -205,10 +246,10 @@ inside the same order. Both accept pasted text or an imported `.txt` file:
 Use one card per line with an optional quantity (`4` or `4x`). Blank lines and
 lines beginning with `#` or `//` are ignored, along with category headings such
 as `COMMANDER (1)`, `CREATURES (20)`, and `Sideboard`. `Front name // Back name` or
-`Front name | Back name` specifies
-a custom reverse. Existing artwork and back pairings are retained; new names
-must have artwork chosen from the MPC Autofill search results before changes can
-be applied. Use the full artwork name or image ID to distinguish variants with
+`Front name | Back name` specifies a custom reverse. Existing artwork and back
+pairings are retained; new names must have artwork chosen from the MPC Autofill
+search results before changes can be applied. Use the full artwork name or image
+ID to distinguish variants with
 the same card name. Each order supports up to 612 cards.
 From the deck viewer, use **Paste replacement decklist** or **Import replacement
 .txt** to carry matching artwork into the replacement. Adding `// Back name` to
@@ -220,7 +261,9 @@ Applying a list updates the loaded order; **Save** writes it back as XML, and
 preserved. The app warns before discarding unsaved changes. Keyboard shortcuts:
 `Ctrl/Cmd+F` searches cards, `Ctrl/Cmd+S` saves, and `Ctrl/Cmd+Shift+S` opens Save As.
 
-Frontend validation (Node 22.6+):
+## Validation
+
+Run the frontend checks with Node 22.6+ after installing its dependencies:
 
 ```sh
 npm --prefix frontend run check
@@ -228,9 +271,14 @@ npm --prefix frontend test
 npm --prefix frontend run build
 ```
 
-The normal Rust suite runs offline with `nix develop --command cargo test --workspace`.
-An optional live artwork-search check is available with:
+Run `cargo test --workspace --locked` with the platform's build prerequisites
+installed, or `nix develop --command cargo test --workspace --locked` on NixOS.
+The normal tests do not contact MPC Autofill or MakePlayingCards, but Cargo may
+need to fetch dependencies on the first run. Node must be on `PATH` for the
+automation crate's JavaScript tests.
+
+Optional live artwork search and thumbnail checks are available with:
 
 ```sh
-nix develop --command cargo test -p mpc-autofill -- --ignored
+nix develop --command cargo test -p mpc-autofill --locked -- --ignored
 ```
