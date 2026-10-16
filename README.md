@@ -29,7 +29,7 @@ Click either thumbnail to view it at full size.
 
 Download the package for your computer from
 [GitHub Releases](https://github.com/jacobbgreene/mpc-autofill-rs/releases).
-The current preview is [v0.1.4](https://github.com/jacobbgreene/mpc-autofill-rs/releases/tag/v0.1.4).
+The current preview is [v0.1.5](https://github.com/jacobbgreene/mpc-autofill-rs/releases/tag/v0.1.5).
 The packaged builds target 64-bit Intel/AMD computers:
 
 - **Windows 10/11:** run the `-setup.exe` installer. It installs WebView2 if
@@ -83,9 +83,11 @@ checks that the packaged applications start. Windows is tested after a silent
 installation; the Linux AppImage is extracted and started on a private display.
 These checks do not exercise a signed-in MakePlayingCards upload.
 
-Keep the versions in `Cargo.toml`, `src-tauri/tauri.conf.json`,
-`frontend/package.json`, and `flake.nix` in sync, then push a matching tag
-(for example, `v0.1.4`). Both platforms must pass before
+Keep the versions in `Cargo.toml`, `Cargo.lock`, `src-tauri/tauri.conf.json`,
+`frontend/package.json`, and `frontend/package-lock.json` in sync. The Nix package
+reads its version from `Cargo.toml`; regenerate its `npmDeps.hash` with the pinned
+Nixpkgs `prefetch-npm-deps` tool whenever the frontend lockfile changes.
+Then push a matching tag (for example, `v0.1.5`). Both platforms must pass before
 the workflow creates a draft preview release with installers, a source archive
 of the exact build revision, `SOURCE.json`, `LICENSE`, `NOTICE.md`, and SHA-256
 checksums. Review the assets and publish the draft to share it. A manual workflow
