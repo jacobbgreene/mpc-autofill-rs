@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Adapts MPC Autofill's desktop-tool/src/order.py and constants.py.
+// Upstream authors: chilli-axe and contributors. Modified for Rust from 2026-09-20.
+// See NOTICE.md and Git history for attribution and dated changes.
 //! The card-order data model and its XML parser.
 //!
 //! Mirrors the semantics of the reference Python tool's `order.py`: cards sharing

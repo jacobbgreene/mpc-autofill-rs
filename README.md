@@ -1,5 +1,10 @@
 # MPC Autofill (Rust)
 
+An unofficial Rust/Tauri adaptation of
+[MPC Autofill](https://github.com/chilli-axe/mpc-autofill), by chilli-axe and
+contributors, with a redesigned desktop interface. Maintained separately from
+the upstream project; see [attribution and modification notices](NOTICE.md).
+
 A Rust/Tauri desktop app that auto-fills a card order into the MakePlayingCards
 project editor. It imports a text decklist or an order XML, downloads the card
 images, and drives a visible Chrome via the Chrome DevTools Protocol to build the
@@ -37,8 +42,9 @@ The packaged builds target 64-bit Intel/AMD computers:
 Install Google Chrome or Chromium separately for browser automation. You do not
 need Rust, Node, or a development server to run the release packages. Autofill
 uses its own browser profile, so your normal browser login is separate.
-The repository is private: download links require repository access, or the
-owner can send you the installer file directly.
+The repository is private: download links require repository access. When
+sharing an installer outside the repository, include the matching source archive,
+`LICENSE`, and `NOTICE.md` so its recipient can access the source and license terms.
 
 ## Quick start
 
@@ -80,7 +86,8 @@ These checks do not exercise a signed-in MakePlayingCards upload.
 Keep the versions in `Cargo.toml`, `src-tauri/tauri.conf.json`,
 `frontend/package.json`, and `flake.nix` in sync, then push a matching tag
 (for example, `v0.1.4`). Both platforms must pass before
-the workflow creates a draft preview release with installers and SHA-256
+the workflow creates a draft preview release with installers, a source archive
+of the exact build revision, `SOURCE.json`, `LICENSE`, `NOTICE.md`, and SHA-256
 checksums. Review the assets and publish the draft to share it. A manual workflow
 run on a branch builds downloadable workflow artifacts without creating a release.
 
@@ -96,12 +103,14 @@ tauri build --bundles nsis -- --locked          # Windows
 tauri build --bundles appimage,deb -- --locked  # Linux
 ```
 
+When distributing a local build, run `node scripts/collect-source.mjs` from the
+same clean, committed checkout. It writes the source archive and license notices
+to `dist/`; share them together with the installer. `SOURCE.json` identifies the
+commit included in the archive. The script refuses uncommitted tracked changes.
+
 The icon uses the same card symbol as the application header. Regenerate its
 platform variants with `tauri icon src-tauri/icons/icon.svg`, or use
 `cargo-tauri icon src-tauri/icons/icon.svg` inside the Nix development shell.
-
-This is a from-scratch reimagining of the reference Python desktop tool, focused
-on a smoother, one-window experience.
 
 ## Layout
 
@@ -271,6 +280,13 @@ npm --prefix frontend test
 npm --prefix frontend run build
 ```
 
+Check release metadata and source packaging with:
+
+```sh
+node scripts/check-release-version.mjs
+node --test scripts/tests/*.test.mjs
+```
+
 Run `cargo test --workspace --locked` with the platform's build prerequisites
 installed, or `nix develop --command cargo test --workspace --locked` on NixOS.
 The normal tests do not contact MPC Autofill or MakePlayingCards, but Cargo may
@@ -282,3 +298,18 @@ Optional live artwork search and thumbnail checks are available with:
 ```sh
 nix develop --command cargo test -p mpc-autofill --locked -- --ignored
 ```
+
+## License and attribution
+
+The application is licensed under the **GNU General Public License version 3
+only (`GPL-3.0-only`)**; see [LICENSE](LICENSE). Its order model, image processing,
+and browser automation adapt the upstream MPC Autofill desktop tool. Upstream
+authors retain their copyright; [NOTICE.md](NOTICE.md) records the source
+references, authorship, and dated Rust/Tauri changes.
+
+**About & licenses** in the app provides the license and attribution offline.
+Card artwork and other third-party content retain their separate rights.
+
+The attribution and source-packaging changes apply to builds containing the
+licensing correction dated 2026-10-16. Previously published installers, including
+v0.1.4, retain their original metadata and do not contain the new in-app notices.

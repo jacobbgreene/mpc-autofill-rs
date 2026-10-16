@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Adapts MPC Autofill's desktop-tool/src/driver.py by chilli-axe and contributors.
+// Modified for Rust/CDP from 2026-09-20; see NOTICE.md and Git history for changes.
 //! The CDP driver. Each public method mirrors a step the reference tool performs
 //! against the live editor; the private helpers wrap the editor's flaky
 //! JavaScript timing (loading spinner, lazily-defined globals, upload status).

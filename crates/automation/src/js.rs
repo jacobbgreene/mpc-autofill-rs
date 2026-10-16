@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Adapts MPC Autofill's desktop-tool/src/driver.py by chilli-axe and contributors.
+// Modified for Rust/CDP from 2026-09-20; see NOTICE.md and Git history for changes.
 //! JavaScript snippets injected into the site's project editor. These call the
 //! editor's own (undocumented) functions — the same ones the reference Python
 //! tool drives — so the exact names here are load-bearing.

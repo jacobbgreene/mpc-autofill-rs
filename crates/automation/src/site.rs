@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Adapts MPC Autofill's desktop-tool/src/constants.py by chilli-axe and contributors.
+// Modified for Rust from 2026-09-20; see NOTICE.md and Git history for changes.
 //! Per-site configuration. Only MakePlayingCards is wired up for now; the struct
 //! keeps room for the PrinterStudio family the reference tool also supports.
 

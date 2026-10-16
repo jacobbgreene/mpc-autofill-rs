@@ -56,6 +56,7 @@ jobs:
       - run: npm --prefix frontend ci
       - run: npm --prefix frontend run check
       - run: npm --prefix frontend test
+      - run: node --test scripts/tests/*.test.mjs
       - run: cargo test --workspace --locked
       - name: Install Tauri CLI
         run: npm install --global @tauri-apps/cli@2.11.4
@@ -75,6 +76,9 @@ jobs:
         run: ./scripts/smoke-windows.ps1
       - name: Save installers
         run: node scripts/collect-installers.mjs
+      - name: Package source and license notices
+        if: runner.os == 'Linux'
+        run: node scripts/collect-source.mjs
       - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
@@ -104,5 +108,7 @@ jobs:
           test "$(find . -name '*.exe' | wc -l)" -eq 1
           test "$(find . -name '*.AppImage' | wc -l)" -eq 1
           test "$(find . -name '*.deb' | wc -l)" -eq 1
-          sha256sum ./*.exe ./*.AppImage ./*.deb > SHA256SUMS
-          gh release create "$RELEASE_TAG" ./*.exe ./*.AppImage ./*.deb SHA256SUMS --verify-tag --draft --prerelease --title "MPC Autofill $RELEASE_TAG" --generate-notes
+          test "$(find . -name '*_source.tar.gz' | wc -l)" -eq 1
+          test -s LICENSE && test -s NOTICE.md && test -s SOURCE.json
+          sha256sum ./*.exe ./*.AppImage ./*.deb ./*_source.tar.gz LICENSE NOTICE.md SOURCE.json > SHA256SUMS
+          gh release create "$RELEASE_TAG" ./*.exe ./*.AppImage ./*.deb ./*_source.tar.gz LICENSE NOTICE.md SOURCE.json SHA256SUMS --verify-tag --draft --prerelease --title "MPC Autofill $RELEASE_TAG" --generate-notes

@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Adapts MPC Autofill's desktop-tool/src/processing.py and constants.py.
+// Upstream authors: chilli-axe and contributors. Modified for Rust from 2026-09-20.
+// See NOTICE.md and Git history for attribution and dated changes.
 //! Optional image post-processing: downscale a high-DPI card image before upload
 //! to cut upload time. The UI preview is handled separately (remote Drive
 //! thumbnails), so this module only produces the upload image.

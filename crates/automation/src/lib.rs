@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Adapts MPC Autofill by chilli-axe and contributors; see NOTICE.md.
+// Rust/Tauri modifications: 2026-09-20 onward; attribution recorded 2026-10-16.
 //! Browser automation for the MakePlayingCards family of sites, driven over the
 //! Chrome DevTools Protocol via `chromiumoxide`. This is a faithful port of the
 //! reference Python tool's Selenium driver: it steps through the editor by

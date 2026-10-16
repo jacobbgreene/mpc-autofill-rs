@@ -12,6 +12,7 @@
   import DeckEditor from "./lib/DeckEditor.svelte";
   import ThemePicker from "./lib/ThemePicker.svelte";
   import SavedDecks from "./lib/SavedDecks.svelte";
+  import LegalNotices from "./lib/LegalNotices.svelte";
   import ChangeArtwork from "./lib/ChangeArtwork.svelte";
   import {
     cachedArtworkDpi,
@@ -910,6 +911,7 @@
       {/if}
     {/if}
   </main>
+  <LegalNotices />
 </div>
 
 {#if dragging && summary}<div class="drop-overlay" role="status">
