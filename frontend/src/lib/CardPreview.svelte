@@ -12,6 +12,8 @@
   const dispatch = createEventDispatcher<{
     close: void;
     changeArtwork: Card;
+    retry: Card;
+    previewFailed: Card;
   }>();
   let dialog: HTMLDialogElement;
   let broken = false;
@@ -20,16 +22,6 @@
   $: if (dialog && (card || artwork) && !dialog.open) dialog.showModal();
   $: if (dialog && !card && !artwork && dialog.open) dialog.close();
 </script>
-
-<svelte:window
-  on:keydown={(event) => {
-    if (event.key === "Escape" && dialog?.open) {
-      event.preventDefault();
-      event.stopPropagation();
-      dialog.close();
-    }
-  }}
-/>
 
 <dialog
   bind:this={dialog}
@@ -54,10 +46,13 @@
           driveId={artwork.drive_id}
           label={artwork.label}
           {retry}
-          on:error={() => (broken = true)}
+          on:error={() => {
+            broken = true;
+            if (card) dispatch("previewFailed", card);
+          }}
           on:loaded={() => (broken = false)}
         />
-      {:else if card?.thumb && !broken}
+      {:else if card?.thumb && card.thumbStatus !== "failed" && !broken}
         <img
           src={card.thumb}
           alt={card.name}
@@ -66,7 +61,11 @@
       {:else}
         <div class="card-placeholder">
           <Icon name="image" size={44} /><span
-            >No preview available for this image.</span
+            >{card?.source === "LocalFile"
+              ? card.local_approved ? "Couldn’t open this local image. Check it in Review local images." : "Allow this image in Review local images to see its artwork."
+              : card?.thumbStatus === "failed" || broken
+                ? "Couldn’t load card artwork. Use Retry preview to try again."
+                : "Loading card artwork…"}</span
           >
         </div>
       {/if}
@@ -89,6 +88,13 @@
         >
         <h2 id="preview-title">{displayName(card)}</h2>
         <p class="preview-dpi">Source artwork · {dpiLabel(card.dpi)}</p>
+        {#if (broken || card.thumbStatus === "failed") && card.source !== "LocalFile"}<button
+            class="button secondary small"
+            on:click={() => {
+              broken = false;
+              if (card) dispatch("retry", card);
+            }}>Retry preview</button
+          >{/if}
         <p class="card-status {card.status}">{statusLabels[card.status]}</p>
         <p>
           Used in {card.slots.length} card slot{card.slots.length === 1

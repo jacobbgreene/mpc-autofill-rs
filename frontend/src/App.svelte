@@ -6,6 +6,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { open, save, confirm } from "@tauri-apps/plugin-dialog";
   import Icon from "./lib/Icon.svelte";
+  import LocalImages from "./lib/LocalImages.svelte";
   import CardTile from "./lib/CardTile.svelte";
   import CardPreview from "./lib/CardPreview.svelte";
   import ProgressPanel from "./lib/ProgressPanel.svelte";
@@ -14,6 +15,7 @@
   import SavedDecks from "./lib/SavedDecks.svelte";
   import LegalNotices from "./lib/LegalNotices.svelte";
   import ChangeArtwork from "./lib/ChangeArtwork.svelte";
+  import { createCloseController } from "./lib/closing";
   import {
     cachedArtworkDpi,
     rememberArtworkDpi,
@@ -34,6 +36,8 @@
   } from "./lib/order";
 
   let summary: OrderSummary | null = null;
+  let reviewLocal = false;
+  let localBusy = false;
   let homePage: "welcome" | "saved" = "welcome";
   let cards: Card[] = [];
   let phase = "";
@@ -41,6 +45,7 @@
   let connected = false;
   let error = "";
   let orderError = "";
+  let orderErrorTitle = "Couldn’t open order";
   let previewError = "";
   let dpiError = "";
   let dpiGeneration = 0;
@@ -59,34 +64,55 @@
   let resumeDraft = false;
   let draftText = "";
   let draftName = "New deck";
-  let savedMessage = "";
+  let moreActions: HTMLDetailsElement;
   let running = false;
-  let closing = false;
+  let draftDirty = false;
+  let closeError = "";
+  let closeErrorDialog: HTMLDialogElement;
+  const closeController = createCloseController({
+    context: () => ({
+      dirty: !!summary?.dirty || draftDirty || artworkApplying || localBusy,
+      running,
+    }),
+    confirm: (message, labels) =>
+      confirm(message, {
+        title: "Close MPC Autofill",
+        kind: "warning",
+        ...labels,
+      }),
+    destroy: () => getCurrentWindow().destroy(),
+    changed: (_state, message) => {
+      closeError = message;
+      if (message) void tick().then(() => closeErrorDialog?.showModal());
+    },
+  });
   let appBar: HTMLElement;
   let appBarHeight = 0;
 
   const filters: { value: Filter; label: string }[] = [
-    { value: "all", label: "All cards" },
+    { value: "all", label: "All artwork" },
     { value: "back", label: "Backs" },
     { value: "attention", label: "Needs attention" },
   ];
+  $: localImages = cards.filter(card => card.source === "LocalFile");
+  $: unapprovedImages = localImages.filter(card => !card.local_approved);
   $: cardbacks = cards.filter((card) => card.cardback);
-  $: deckImageCount = cards.length - cardbacks.length;
+  $: filename = summary?.path.split(/[\\/]/).pop() || "Not saved yet";
   $: attentionCount = cards.filter(needsAttention).length;
   $: visibleCards = filterCards(cards, filter, query);
   $: selectedCard = cards.find((card) => cardKey(card) === selectedKey) ?? null;
 
   // Coalesce event bursts without conflating a front's placement with its back.
-  let pending: { driveId: string; change: Partial<Card>; face?: Face }[] = [];
+  let pending: { driveId: string; change: Partial<Card>; face?: Face; source?: Card["source"]; sessionId?: number }[] = [];
   let frame: number | null = null;
   function flush() {
     frame = null;
     for (const update of pending)
-      cards = patchCards(cards, update.driveId, update.change, update.face);
+      if (update.sessionId === summary?.session_id) cards = patchCards(cards, update.driveId, update.change, update.face, update.source);
     pending = [];
   }
-  function patch(driveId: string, change: Partial<Card>, face?: Face) {
-    pending.push({ driveId, change, face });
+  function patch(driveId: string, change: Partial<Card>, face?: Face, source?: Card["source"], sessionId = summary?.session_id) {
+    pending.push({ driveId, change, face, source, sessionId });
     if (frame === null) frame = requestAnimationFrame(flush);
   }
 
@@ -111,18 +137,18 @@
             }),
           ),
           register(
-            listen<{ drive_id: string; ok: boolean; error?: string }>(
+            listen<{ drive_id: string; source?: Card["source"]; ok: boolean; error?: string }>(
               "download-progress",
               ({ payload }) => {
                 downloadCompleted = Math.min(
                   cards.length,
-                  downloadCompleted + 1,
+                  downloadCompleted + cards.filter(card => card.drive_id === payload.drive_id && (card.source ?? "GoogleDrive") === (payload.source ?? "GoogleDrive")).length,
                 );
                 if (!payload.ok) downloadFailures += 1;
                 patch(payload.drive_id, {
                   status: payload.ok ? "downloaded" : "download-failed",
                   error: payload.ok ? undefined : payload.error,
-                });
+                }, undefined, payload.source);
               },
             ),
           ),
@@ -136,30 +162,35 @@
             }),
           ),
           register(
-            listen<{ drive_id: string; face: Face; status: Status }>(
+            listen<{ drive_id: string; source?: Card["source"]; face: Face; status: Status }>(
               "card-status",
               ({ payload }) => {
                 patch(
                   payload.drive_id,
                   { status: payload.status },
                   payload.face,
+                  payload.source,
                 );
               },
             ),
           ),
           register(
-            listen<{ drive_id: string; path: string }>(
+            listen<{ drive_id: string; session_id?: number; source?: Card["source"]; path?: string; error?: string }>(
               "thumb-ready",
               ({ payload }) => {
                 patch(payload.drive_id, {
-                  thumb: convertFileSrc(payload.path),
-                });
+                  thumb: payload.path
+                    ? convertFileSrc(payload.path)
+                    : undefined,
+                  thumbStatus: payload.path ? "ready" : "failed",
+                  thumbError: payload.error,
+                }, undefined, payload.source, payload.session_id);
               },
             ),
           ),
           register(
             getCurrentWebview().onDragDropEvent(({ payload }) => {
-              if (busy || editorMode || artworkCard) return;
+              if (busy || editorMode || artworkCard || reviewLocal) return;
               if (payload.type === "enter" || payload.type === "over")
                 dragging = true;
               else dragging = false;
@@ -169,7 +200,8 @@
                   !/\.(xml|txt|mpcdeck)$/i.test(payload.paths[0])
                 ) {
                   orderError =
-                    "Choose one .xml deck or .txt decklist at a time.";
+                    "Choose one .xml deck, .mpcdeck draft, or .txt decklist at a time.";
+                  orderErrorTitle = "Couldn’t open file";
                   return;
                 }
                 void openPath(payload.paths[0]);
@@ -178,21 +210,8 @@
           ),
           register(
             getCurrentWindow().onCloseRequested(async (event) => {
-              if (
-                closing ||
-                (!summary?.dirty && !editorMode && !artworkApplying)
-              )
-                return;
               event.preventDefault();
-              if (
-                await confirm(
-                  "Close without saving your order or draft edits?",
-                  { title: "Unsaved changes", kind: "warning" },
-                )
-              ) {
-                closing = true;
-                await getCurrentWindow().close();
-              }
+              await closeController.request();
             }),
           ),
         ]);
@@ -216,6 +235,7 @@
     if (busy || !connected) return;
     busy = true;
     orderError = "";
+    orderErrorTitle = "Couldn’t open order";
     libraryWarning = "";
     dragging = false;
     try {
@@ -232,7 +252,11 @@
       frame = null;
       pending = [];
       summary = loaded;
-      cards = loaded.cards.map((card) => ({ ...card, status: "pending" }));
+      cards = loaded.cards.map((card) => ({
+        ...card,
+        status: "pending",
+        thumbStatus: "loading",
+      }));
       if (!loaded.draft) void loadDpi();
       phase = "";
       error = "";
@@ -242,7 +266,6 @@
       query = "";
       filter = "all";
       selectedKey = null;
-      savedMessage = loaded.draft ? "Draft saved" : "Deck saved";
       await tick();
       window.scrollTo({ top: 0 });
       if (!loaded.draft)
@@ -289,6 +312,7 @@
       editorMode = summary && !summary.draft ? "replace" : "create";
     } catch (e) {
       orderError = `Could not import this decklist: ${String(e)}`;
+      orderErrorTitle = "Couldn’t import decklist";
     } finally {
       busy = false;
     }
@@ -311,13 +335,14 @@
       if (typeof path === "string") await openPath(path);
     } catch (e) {
       orderError = `Could not open the file picker: ${String(e)}`;
+      orderErrorTitle = "Couldn’t open file picker";
     } finally {
       busy = false;
     }
   }
 
   async function fill() {
-    if (busy || !summary || summary.draft || !connected) return;
+    if (busy || !summary || summary.draft || !connected || unapprovedImages.length) return;
     busy = true;
     running = true;
     error = "";
@@ -334,6 +359,17 @@
       await invoke("fill");
     } catch (e) {
       error = String(e);
+      flush();
+      cards = cards.map((card) =>
+        card.status === "uploading"
+          ? {
+              ...card,
+              status: "interrupted",
+              error:
+                "Autofill stopped before this placement was confirmed. Check the browser project before ordering.",
+            }
+          : card,
+      );
     } finally {
       busy = false;
       running = false;
@@ -350,12 +386,17 @@
     if (busy || !summary || summary.draft) return;
     busy = true;
     orderError = "";
-    savedMessage = "";
+    orderErrorTitle = "Couldn’t save";
     libraryWarning = "";
     try {
       let path: string | null = null;
-      if (saveAs || !summary.path) {
+      const renamed =
+        !!summary.path && filename.replace(/\.xml$/i, "") !== summary.name;
+      if (saveAs || !summary.path || renamed) {
         let defaultPath = summary.path;
+        const suggestedName = `${summary.name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")}.xml`;
+        if (renamed)
+          defaultPath = summary.path.replace(/[^\\/]+$/, () => suggestedName);
         if (!defaultPath) {
           const fileName = `${summary.name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")}.xml`;
           try {
@@ -375,9 +416,8 @@
         if (!path) return;
       }
       summary = await invoke<OrderSummary>("save_order", { path });
-      savedMessage = "Order saved";
     } catch (e) {
-      orderError = `Could not save this order: ${String(e)}`;
+      orderError = `Your deck is still in the app. Try Save again, or use More → Save as… to choose another location. ${String(e)}`;
     } finally {
       busy = false;
     }
@@ -408,6 +448,7 @@
       window.scrollTo({ top: 0 });
     } catch (e) {
       orderError = `Could not open saved decks: ${String(e)}`;
+      orderErrorTitle = "Couldn’t open saved decks";
     } finally {
       busy = false;
     }
@@ -425,7 +466,7 @@
     dpiError = "";
     cards = cards.map((card) => ({
       ...card,
-      dpi: cachedArtworkDpi(card.drive_id),
+      dpi: card.source === "LocalFile" ? null : cachedArtworkDpi(card.drive_id),
     }));
     const ids = [
       ...new Set(
@@ -444,7 +485,7 @@
       if (generation !== dpiGeneration) return;
       cards = cards.map((card) => ({
         ...card,
-        dpi: cachedArtworkDpi(card.drive_id) ?? null,
+        dpi: card.source === "LocalFile" ? null : cachedArtworkDpi(card.drive_id) ?? null,
       }));
     } catch {
       if (generation !== dpiGeneration) return;
@@ -465,7 +506,7 @@
     artworkCard = null;
     // Reuse the gallery's cached image while the order thumbnails refresh.
     invoke<string>("artwork_thumbnail", { driveId: previewId })
-      .then((path) => patch(previewId, { thumb: convertFileSrc(path) }))
+      .then((path) => patch(previewId, { thumb: convertFileSrc(path) }, undefined, "GoogleDrive"))
       .catch(() => {});
     await tick();
     document
@@ -479,24 +520,24 @@
     if (frame !== null) cancelAnimationFrame(frame);
     frame = null;
     pending = [];
+    const sessionChanged = edited.session_id !== summary?.session_id;
     const thumbnails = new Map(
-      cards.map((card) => [card.drive_id, card.thumb]),
+      cards
+        // A new approval may replace the bytes at an unchanged local path.
+        .filter((card) => !sessionChanged || card.source !== "LocalFile")
+        .map((card) => [cardKey(card), card.thumb]),
     );
     summary = edited;
     cards = edited.cards.map((card) => ({
       ...card,
-      thumb: thumbnails.get(card.drive_id),
+      thumb: thumbnails.get(cardKey(card)),
+      thumbStatus: thumbnails.get(cardKey(card)) ? "ready" : "loading",
       status: "pending",
     }));
     if (!edited.draft) void loadDpi();
     phase = "";
     error = "";
     orderError = "";
-    savedMessage = edited.draft
-      ? "Draft saved"
-      : !edited.dirty && edited.path
-        ? "Deck saved"
-        : "";
     previewError = "";
     downloadCompleted = 0;
     downloadFailures = 0;
@@ -511,6 +552,36 @@
           (previewError =
             "Card previews could not be loaded. You can still start autofill."),
       );
+  }
+
+  function previewFailed(card: Card) {
+    patch(card.drive_id, {
+      thumbStatus: "failed",
+      thumbError: "The preview could not be displayed.",
+    }, undefined, card.source ?? "GoogleDrive");
+  }
+
+  async function retryPreview(card: Card) {
+    if (card.source === "LocalFile") return;
+    const order = summary;
+    patch(card.drive_id, {
+      thumb: undefined,
+      thumbStatus: "loading",
+      thumbError: undefined,
+    }, undefined, "GoogleDrive");
+    try {
+      const path = await invoke<string>("artwork_thumbnail", {
+        driveId: card.drive_id,
+      });
+      if (summary === order)
+        patch(card.drive_id, {
+          thumb: convertFileSrc(path),
+          thumbStatus: "ready",
+        }, undefined, "GoogleDrive");
+    } catch (e) {
+      if (summary === order)
+        patch(card.drive_id, { thumbStatus: "failed", thumbError: String(e) }, undefined, "GoogleDrive");
+    }
   }
 </script>
 
@@ -555,9 +626,7 @@
         >A little less work. A lot more cards.</span
       >{/if}
     {#if summary}<div class="file-actions">
-        <span class="save-status" class:unsaved={summary.dirty} role="status"
-          >{summary.dirty ? "Unsaved changes" : savedMessage}</span
-        ><button
+        <button
           class="button secondary small"
           disabled={busy}
           on:click={browseSavedDecks}
@@ -575,26 +644,52 @@
           on:click={() => (editorMode = "edit")}>Edit list</button
         ><button
           class="button secondary small"
-          disabled={busy}
-          on:click={() => replaceWithDecklist()}>Replace deck</button
-        ><button
-          class="button secondary small"
-          disabled={busy || !connected}
-          on:click={pasteDecklist}>New deck</button
-        ><button
-          class="button secondary small"
           on:click={() => saveOrder()}
           disabled={busy || !connected}>Save</button
-        ><button
-          class="button secondary small"
-          on:click={() => saveOrder(true)}
-          disabled={busy || !connected}>Save as…</button
-        >{/if}<button
-          class="button secondary small"
-          on:click={() => openOrder()}
-          disabled={busy || !connected}
-          ><Icon name="folder" size={16} />Open deck…</button
-        >
+        >{/if}
+        <details class="more-actions" bind:this={moreActions}>
+          <summary class="button secondary small">More</summary>
+          <div class="more-actions-menu">
+            {#if !summary.draft}
+            <button
+              class="button secondary small"
+              disabled={busy}
+              on:click={() => {
+                moreActions.open = false;
+                replaceWithDecklist();
+              }}>Replace deck</button
+            ><button
+              class="button secondary small"
+              disabled={busy || !connected}
+              on:click={() => {
+                moreActions.open = false;
+                void openOrder(true);
+              }}>Import replacement .txt</button
+            ><button
+              class="button secondary small"
+              on:click={() => {
+                moreActions.open = false;
+                void saveOrder(true);
+              }}
+              disabled={busy || !connected}>Save as…</button
+            >{/if}<button
+              class="button secondary small"
+              disabled={busy || !connected}
+              on:click={() => {
+                moreActions.open = false;
+                pasteDecklist();
+              }}>New deck</button
+            ><button
+              class="button secondary small"
+              on:click={() => {
+                moreActions.open = false;
+                void openOrder();
+              }}
+              disabled={busy || !connected}
+              ><Icon name="folder" size={16} />Open order</button
+            >
+          </div>
+        </details>
       </div>{/if}
     <ThemePicker />
   </header>
@@ -604,7 +699,7 @@
       <div class="notice error-notice" role="alert">
         <Icon name="warning" />
         <div>
-          <strong>Order unavailable</strong>
+          <strong>{orderErrorTitle}</strong>
           <p>{orderError}</p>
         </div>
         <button
@@ -730,74 +825,33 @@
         <div class="order-heading">
           <p class="eyebrow">YOUR ORDER</p>
           <h1 id="order-title">{summary.name}</h1>
+          <div class="order-save-state">
+            <span
+              class="save-status"
+              class:unsaved={summary.dirty}
+              role="status">{summary.dirty ? "Unsaved changes" : "Saved"}</span
+            ><span
+              class="order-filename"
+              title={summary.path || "Save to choose an XML file"}
+              >{filename}</span
+            >
+          </div>
           <div class="order-meta">
             <span><Icon size={14} />{summary.quantity} cards</span><span
               >{summary.stock}</span
-            ><span>{summary.foil ? "Foil finish" : "Non-foil"}</span>
+            ><span>{summary.foil ? "Foil finish" : "Non-foil"}</span><button
+              class="text-button"
+              disabled={busy}
+              on:click={() => (editorMode = "edit")}>Edit print settings</button
+            >
           </div>
         </div>
-        <div class="decklist-actions">
-          <button class="button primary small" disabled={busy || !connected}
-            on:click={() => replaceWithDecklist()}>Paste replacement decklist</button>
-          <button class="button secondary small" disabled={busy || !connected}
-            on:click={() => openOrder(true)}>Import replacement .txt</button>
-          <span>Matching cards can reuse artwork from this deck.</span>
-        </div>
         <div class="order-actions">
-          {#each cardbacks as card (cardKey(card))}
-            <div
-              class="common-back"
-              class:needs-attention={needsAttention(card)}
-            >
-              <button
-                class="back-preview"
-                on:click={() => (selectedKey = cardKey(card))}
-                aria-label={`Preview common cardback, ${card.name}`}
-                title="Preview common back"
-              >
-                <span class="back-mini"
-                  >{#if card.thumb && card.thumb !== failedBackThumb}<img
-                      src={card.thumb}
-                      alt=""
-                      on:error={() => (failedBackThumb = card.thumb ?? null)}
-                    />{:else}<Icon size={22} />{/if}</span
-                >
-                <span class="back-preview-hint">Preview</span>
-              </button>
-              <div class="common-back-info">
-                <span class="eyebrow">COMMON BACK</span><strong
-                  title={displayName(card)}>{displayName(card)}</strong
-                ><span class="muted"
-                  >Used on {card.slots.length} card{card.slots.length === 1
-                    ? ""
-                    : "s"}</span
-                >
-                <span
-                  class="card-dpi"
-                  title="Original artwork resolution reported by MPC Autofill"
-                  >{dpiLabel(card.dpi)}</span
-                >
-                {#if needsAttention(card)}<span
-                    class="common-back-warning"
-                    title={card.error}
-                  >
-                    <Icon name="warning" size={13} />{statusLabels[card.status]}
-                  </span>{/if}
-                <button
-                  class="button secondary small common-back-change"
-                  data-card-key={cardKey(card)}
-                  disabled={busy || !connected}
-                  on:click={() => changeArtwork(card)}
-                  ><Icon name="image" size={14} />Change back</button
-                >
-              </div>
-            </div>
-          {/each}
           <div class="start-action">
             <button
               class="button primary"
               on:click={fill}
-              disabled={busy || !connected}
+              disabled={busy || !connected || unapprovedImages.length > 0}
               ><Icon name={running ? "clock" : "arrow"} size={17} />{running
                 ? "Autofill in progress"
                 : phase === "done"
@@ -814,6 +868,12 @@
         </div>
       </section>
 
+      {#if localImages.length}
+        <div class="notice" role="status">
+          <p>{unapprovedImages.length ? `${unapprovedImages.length} local artwork image(s) need your approval before autofill.` : "Local artwork approved for this session."}</p>
+          <button class="button secondary small" disabled={busy} on:click={() => (reviewLocal = true)}>Review local images</button>
+        </div>
+      {/if}
       <ProgressPanel
         {cards}
         {phase}
@@ -838,10 +898,8 @@
       <section class="library" aria-labelledby="library-title">
         <div class="library-heading">
           <div>
-            <h2 id="library-title">
-              Your cards <span class="count-badge">{deckImageCount}</span>
-            </h2>
-            <p>Preview your cards or change their artwork.</p>
+            <h2 id="library-title">Your cards</h2>
+            <p>{summary.quantity} cards · {cards.length} artwork images</p>
           </div>
           <label class="search-field"
             ><Icon name="search" size={17} /><input
@@ -865,7 +923,7 @@
               >{/each}
           </div>
           <span class="result-count" aria-live="polite"
-            >{visibleCards.length} images</span
+            >{visibleCards.length} image{visibleCards.length === 1 ? "" : "s"}</span
           >
         </div>
         {#if visibleCards.length}
@@ -875,6 +933,8 @@
                 disabled={busy || !connected}
                 on:click={() => (selectedKey = cardKey(card))}
                 on:changeArtwork={(event) => changeArtwork(event.detail)}
+                on:retry={(event) => retryPreview(event.detail)}
+                on:previewFailed={(event) => previewFailed(event.detail)}
               />{/each}
           </div>
         {:else}
@@ -905,7 +965,7 @@
       </section>
       <footer class="library-footer">
         <Icon size={14} /><span
-          >{summary.quantity} cards · {cards.length} front and back images</span
+          >{summary.quantity} cards · {cards.length} artwork images</span
         ><span>Made for your next deck.</span>
       </footer>
       {/if}
@@ -927,6 +987,8 @@
   disabled={busy || !connected}
   on:close={() => (selectedKey = null)}
   on:changeArtwork={(event) => changeArtwork(event.detail)}
+  on:retry={(event) => retryPreview(event.detail)}
+  on:previewFailed={(event) => previewFailed(event.detail)}
 />
 {#if artworkCard}<ChangeArtwork
     card={artworkCard}
@@ -940,7 +1002,38 @@
     initialText={editorMode !== "edit" && !resumeDraft ? draftText : ""}
     initialName={resumeDraft && summary ? summary.name : draftName}
     initialDraft={editorMode === "create" && resumeDraft ? summary?.draft ?? null : null}
+    currentOrder={summary}
     replacingUnsaved={summary?.dirty ?? false}
+    bind:dirty={draftDirty}
     on:close={() => (editorMode = null)}
     on:applied={(event) => applyEditedOrder(event.detail)}
   />{/if}
+{#if reviewLocal}<LocalImages {cards} on:close={() => (reviewLocal = false)}
+  on:applied={(event) => applyEditedOrder(event.detail, true)} on:busy={(event) => { localBusy = event.detail; busy = event.detail; }} />{/if}
+{#if closeError}<dialog
+    bind:this={closeErrorDialog}
+    class="editor-dialog close-error-dialog"
+    aria-labelledby="close-error-title"
+    on:cancel={() => (closeError = "")}
+  >
+    <header class="editor-header">
+      <h2 id="close-error-title">The app could not close</h2>
+    </header>
+    <div class="editor-body"><p role="alert">{closeError}</p></div>
+    <footer class="editor-footer">
+      <button
+        class="button secondary"
+        on:click={() => {
+          closeErrorDialog.close();
+          closeError = "";
+        }}>Keep editing</button
+      >
+      <button
+        class="button primary"
+        on:click={() => {
+          closeErrorDialog.close();
+          void closeController.request();
+        }}>Retry close</button
+      >
+    </footer>
+  </dialog>{/if}

@@ -1,9 +1,10 @@
 [workspace]
 resolver = "2"
 members = ["crates/core", "crates/automation", "src-tauri"]
+exclude = ["vendor/glib"]
 
 [workspace.package]
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 license = "GPL-3.0-only"
 
@@ -20,3 +21,8 @@ tracing = "0.1"
 lto = "thin"
 codegen-units = 1
 strip = true
+
+# GTK3 requires GLib 0.18. This carries the upstream two-line fix without a GUI
+# dependency migration. See vendor/glib/PATCH.md and the integrity CI gate.
+[patch.crates-io]
+glib = { path = "vendor/glib" }

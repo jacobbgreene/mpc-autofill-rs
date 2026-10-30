@@ -15,7 +15,9 @@ async fn main() {
     eprintln!("CHROME={chrome:?} headful={headful}");
 
     let t = Instant::now();
-    let mut builder = BrowserConfig::builder().window_size(1200, 900).viewport(None);
+    let mut builder = BrowserConfig::builder()
+        .window_size(1200, 900)
+        .viewport(None);
     if headful {
         builder = builder.with_head();
     }
@@ -60,7 +62,11 @@ async fn main() {
                 e.elapsed(),
                 v.value()
             ),
-            Err(err) => eprintln!("[{:>7.2?}] evaluate #{i} FAILED in {:?}: {err}", t.elapsed(), e.elapsed()),
+            Err(err) => eprintln!(
+                "[{:>7.2?}] evaluate #{i} FAILED in {:?}: {err}",
+                t.elapsed(),
+                e.elapsed()
+            ),
         }
     }
 
@@ -77,8 +83,16 @@ async fn main() {
     // Element lookup, as find_element does for #uploadId etc.
     let e = Instant::now();
     match page.find_element("body").await {
-        Ok(_) => eprintln!("[{:>7.2?}] find_element(body) OK in {:?}", t.elapsed(), e.elapsed()),
-        Err(err) => eprintln!("[{:>7.2?}] find_element FAILED in {:?}: {err}", t.elapsed(), e.elapsed()),
+        Ok(_) => eprintln!(
+            "[{:>7.2?}] find_element(body) OK in {:?}",
+            t.elapsed(),
+            e.elapsed()
+        ),
+        Err(err) => eprintln!(
+            "[{:>7.2?}] find_element FAILED in {:?}: {err}",
+            t.elapsed(),
+            e.elapsed()
+        ),
     }
 
     let _ = browser.close().await;

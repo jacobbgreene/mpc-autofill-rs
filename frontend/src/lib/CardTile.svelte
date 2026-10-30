@@ -11,7 +11,11 @@
   } from "./order";
   export let card: Card;
   export let disabled = false;
-  const dispatch = createEventDispatcher<{ changeArtwork: Card }>();
+  const dispatch = createEventDispatcher<{
+    changeArtwork: Card;
+    retry: Card;
+    previewFailed: Card;
+  }>();
   let broken = false;
   $: if (card.thumb) broken = false;
 </script>
@@ -24,17 +28,26 @@
     aria-label={`Preview ${card.name}, ${card.face}, ${statusLabels[card.status]}`}
   >
     <span class="card-art">
-      {#if card.thumb && !broken}
+      {#if card.thumb && card.thumbStatus !== "failed" && !broken}
         <img
           src={card.thumb}
           alt=""
           loading="lazy"
           decoding="async"
-          on:error={() => (broken = true)}
+          on:error={() => {
+            broken = true;
+            dispatch("previewFailed", card);
+          }}
         />
       {:else}
         <span class="card-placeholder"
-          ><Icon name="image" size={28} /><span>Preview unavailable</span></span
+          ><Icon name="image" size={28} /><span
+            >{card.source === "LocalFile"
+              ? card.local_approved ? "Couldn’t open this local image" : "Approve this local image to see its artwork"
+              : card.thumbStatus === "failed" || broken
+                ? "Couldn’t load card artwork. Retry below."
+                : "Loading card artwork…"}</span
+          ></span
         >
       {/if}
       <span class="face-label"
@@ -72,6 +85,15 @@
       {statusLabels[card.status]}
     </span>
   </button>
+  {#if (broken || card.thumbStatus === "failed") && card.source !== "LocalFile"}<button
+      class="text-button retry-card-preview"
+      aria-label={`Retry preview for ${displayName(card)}`}
+      title={card.thumbError}
+      on:click={() => {
+        broken = false;
+        dispatch("retry", card);
+      }}>Retry preview</button
+    >{/if}
   <button
     class="card-change-art"
     data-card-key={cardKey(card)}

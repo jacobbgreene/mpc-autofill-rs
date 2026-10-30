@@ -1,0 +1,54 @@
+{
+  "baseline": {
+    "Layerize": {
+      "count": 450,
+      "totalMs": 233.28100000000063
+    },
+    "Paint": {
+      "count": 1595,
+      "totalMs": 114.01600000000012
+    },
+    "RasterTask": {
+      "count": 682,
+      "totalMs": 18.04799999999999
+    },
+    "Layout": {
+      "count": 66,
+      "totalMs": 10.422999999999996
+    },
+    "UpdateLayoutTree": {
+      "count": 387,
+      "totalMs": 26.025000000000027
+    },
+    "ImageDecodeTask": {
+      "count": 0,
+      "totalMs": 0
+    }
+  },
+  "visible": {
+    "Layerize": {
+      "count": 336,
+      "totalMs": 24.254000000000158
+    },
+    "Paint": {
+      "count": 95,
+      "totalMs": 33.534000000000006
+    },
+    "RasterTask": {
+      "count": 60,
+      "totalMs": 3.7850000000000006
+    },
+    "Layout": {
+      "count": 2,
+      "totalMs": 0.334
+    },
+    "UpdateLayoutTree": {
+      "count": 33,
+      "totalMs": 1.7330000000000003
+    },
+    "ImageDecodeTask": {
+      "count": 0,
+      "totalMs": 0
+    }
+  }
+}

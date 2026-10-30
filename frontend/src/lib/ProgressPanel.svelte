@@ -1,6 +1,12 @@
 <script lang="ts">
   import Icon from "./Icon.svelte";
-  import { phaseIndex, placementCounts, type Card, type Face } from "./order";
+  import {
+    phaseIndex,
+    placementCounts,
+    autofillRecovery,
+    type Card,
+    type Face,
+  } from "./order";
   export let cards: Card[];
   export let phase: string;
   export let busy: boolean;
@@ -26,6 +32,7 @@
     ? "Autofill stopped"
     : ({
         downloading: "Preparing your card images",
+        "starting-browser": "Opening the automation browser",
         "awaiting-sign-in": "Your turn: sign in to MakePlayingCards",
         configuring: "Setting up your project",
         "uploading-fronts": "Adding card fronts",
@@ -37,7 +44,7 @@
           : "Your project is ready for review",
       }[phase] ?? "Ready when you are");
   $: description = error
-    ? "The run could not finish. Review the details below before starting again."
+    ? autofillRecovery(phase, error)
     : phase === "awaiting-sign-in"
       ? "Sign in in the Chrome window. Autofill will continue automatically."
       : phase === "done"
@@ -53,6 +60,7 @@
 
 <section
   class="progress-panel"
+  class:idle={!phase && !busy && !error}
   class:attention={phase === "awaiting-sign-in" ||
     (phase === "done" && attention)}
   class:has-error={!!error}
@@ -115,13 +123,13 @@
         value={downloadCompleted}
         max={cards.length}
         aria-label="Image preparation"
-      />
+      ></progress>
     {:else if uploading && faceCounts.total}
       <progress
         value={faceCounts.inserted + faceCounts.skipped}
         max={faceCounts.total}
         aria-label={`Processing ${activeFace} images`}
-      />
-    {:else}<progress aria-label="Setting up MakePlayingCards" />{/if}
+      ></progress>
+    {:else}<progress aria-label="Setting up MakePlayingCards"></progress>{/if}
   {/if}
 </section>

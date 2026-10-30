@@ -70,7 +70,7 @@
       />{/key}
   {:else}<span class="artwork-placeholder"
       ><Icon name="image" size={28} /><span
-        >{error ? "Preview unavailable" : "Loading preview…"}</span
+        >{error ? "Couldn’t load card artwork" : "Loading card artwork…"}</span
       ></span
     >{/if}
 </span>

@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+use autofill_core::validation::{read_text_file_bounded, validate_drive_id, MAX_XML_BYTES};
 use autofill_core::{Order, Source};
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -206,9 +207,11 @@ fn is_deck_file(path: &Path) -> bool {
 }
 
 fn read_index(path: &Path) -> Result<Index, String> {
-    match std::fs::read_to_string(path) {
+    match read_text_file_bounded(path, MAX_XML_BYTES) {
         Ok(text) => serde_json::from_str(&text).map_err(|e| e.to_string()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Index::default()),
+        Err(autofill_core::Error::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
+            Ok(Index::default())
+        }
         Err(e) => Err(e.to_string()),
     }
 }
@@ -243,7 +246,7 @@ fn describe(path: &Path) -> Result<SavedDeck, String> {
     }
     let path = std::fs::canonicalize(path).map_err(|e| e.to_string())?;
     let metadata = path.metadata().map_err(|e| e.to_string())?;
-    if !metadata.is_file() || metadata.len() > 8 * 1024 * 1024 {
+    if !metadata.is_file() || metadata.len() > MAX_XML_BYTES as u64 {
         return Err("not an order file under 8 MB".into());
     }
     let saved_draft = draft::read_if_draft(&path)?;
@@ -259,18 +262,13 @@ fn describe(path: &Path) -> Result<SavedDeck, String> {
         )
     } else {
         let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Deck");
-        let xml = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        let xml = read_text_file_bounded(&path, MAX_XML_BYTES).map_err(|e| e.to_string())?;
         let order = Order::from_xml(name, &xml).map_err(|e| e.to_string())?;
         let preview_id = order
             .fronts
             .iter()
             .find(|card| {
-                card.source == Source::GoogleDrive
-                    && !card.drive_id.is_empty()
-                    && card
-                        .drive_id
-                        .chars()
-                        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                card.source == Source::GoogleDrive && validate_drive_id(&card.drive_id).is_ok()
             })
             .map(|card| card.drive_id.clone());
         (
@@ -378,31 +376,29 @@ mod tests {
 
     const XML: &str = "<order><details><quantity>3</quantity><stock>(S30) Standard Smooth</stock><foil>false</foil></details><fronts><card><id>front-art</id><slots>0,1,2</slots><name>Island.png</name></card></fronts><cardback>back-art</cardback></order>";
 
-    struct Fixture(PathBuf);
+    struct Fixture(tempfile::TempDir);
     impl Fixture {
         fn new() -> Self {
-            let stamp = std::time::SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
-            let path =
-                std::env::temp_dir().join(format!("mpc-library-{}-{stamp}", std::process::id()));
-            std::fs::create_dir_all(path.join("Documents")).unwrap();
-            Self(path)
+            // Atomic creation provides isolation even when concurrent tests
+            // observe the same timestamp on a virtualized CI clock.
+            let directory = tempfile::Builder::new()
+                .prefix("mpc-library-")
+                .tempdir()
+                .unwrap();
+            std::fs::create_dir(directory.path().join("Documents")).unwrap();
+            Self(directory)
         }
         fn library(&self) -> SavedDecks {
-            SavedDecks::new(self.0.join("data"), Some(self.0.join("Documents")))
+            SavedDecks::new(
+                self.0.path().join("data"),
+                Some(self.0.path().join("Documents")),
+            )
         }
         fn deck(&self, relative: &str) -> PathBuf {
-            let path = self.0.join(relative);
+            let path = self.0.path().join(relative);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, XML).unwrap();
             path
-        }
-    }
-    impl Drop for Fixture {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
         }
     }
 
@@ -442,7 +438,11 @@ mod tests {
         let legacy = fixture.deck("Documents/Old deck.XML");
         let managed = fixture.deck("Documents/MPC Autofill/Decks/New deck.xml");
         fixture.deck("Documents/unrelated/nested.xml");
-        std::fs::write(fixture.0.join("Documents/settings.xml"), "<settings/>").unwrap();
+        std::fs::write(
+            fixture.0.path().join("Documents/settings.xml"),
+            "<settings/>",
+        )
+        .unwrap();
         let listing = library.list().await.unwrap();
         assert_eq!(listing.decks.len(), 2);
         assert!(listing.warning.is_none());
@@ -539,7 +539,10 @@ mod tests {
         let path = library.default_path("My deck.xml").await.unwrap();
         assert_eq!(
             PathBuf::from(path),
-            fixture.0.join("Documents/MPC Autofill/Decks/My deck.xml")
+            fixture
+                .0
+                .path()
+                .join("Documents/MPC Autofill/Decks/My deck.xml")
         );
         assert!(library.folder.is_dir());
         assert_eq!(
@@ -558,8 +561,8 @@ mod tests {
         ] {
             assert!(library.default_path(invalid).await.is_err());
         }
-        let fallback = SavedDecks::new(fixture.0.join("data"), None);
-        assert_eq!(fallback.folder, fixture.0.join("data/decks"));
+        let fallback = SavedDecks::new(fixture.0.path().join("data"), None);
+        assert_eq!(fallback.folder, fixture.0.path().join("data/decks"));
     }
 
     #[tokio::test]
@@ -645,5 +648,43 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["Zeta", "Alpha"]
         );
+    }
+
+    #[tokio::test]
+    async fn listing_rejects_hostile_xml_without_modifying_decks_or_nearby_files() {
+        let fixture = Fixture::new();
+        let valid = fixture.deck("Documents/MPC Autofill/Decks/Valid.xml");
+        let outside = fixture.0.path().join("private-image.jpg");
+        std::fs::write(&outside, "untouched private fixture").unwrap();
+        for (name, xml) in [
+            (
+                "Huge quantity",
+                XML.replace("<quantity>3</quantity>", "<quantity>4294967295</quantity>"),
+            ),
+            (
+                "Traversal",
+                XML.replace("front-art", "art#/../../../../private-image"),
+            ),
+            ("Malformed slots", XML.replace("0,1,2", "0,invalid,2")),
+        ] {
+            let path = fixture.deck(&format!("Documents/MPC Autofill/Decks/{name}.xml"));
+            std::fs::write(path, xml).unwrap();
+        }
+        let oversized = fixture.deck("Documents/MPC Autofill/Decks/Oversized.xml");
+        std::fs::File::options()
+            .write(true)
+            .open(&oversized)
+            .unwrap()
+            .set_len(MAX_XML_BYTES as u64 + 1)
+            .unwrap();
+        let listing = fixture.library().list().await.unwrap();
+        assert_eq!(listing.decks.len(), 1);
+        assert_eq!(listing.decks[0].name, "Valid");
+        assert_eq!(std::fs::read_to_string(valid).unwrap(), XML);
+        assert_eq!(
+            std::fs::read_to_string(outside).unwrap(),
+            "untouched private fixture"
+        );
+        assert!(describe(&oversized).is_err());
     }
 }

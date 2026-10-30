@@ -1,5 +1,6 @@
 //! Replace one image without rebuilding the deck or changing slot pairings.
 use crate::decklist::ArtworkSelection;
+use crate::validation::{validate_drive_id, validate_field};
 use crate::{Error, Face, Order, Result, Source};
 
 impl Order {
@@ -9,22 +10,29 @@ impl Order {
             "back" => Face::Back,
             _ => return Err(Error::Invalid("choose a front or back image".into())),
         };
-        if !crate::order::valid_drive_id(&selection.drive_id) {
-            return Err(Error::Invalid(
-                "selected artwork has an invalid Google Drive ID".into(),
-            ));
-        }
+        validate_drive_id(&selection.drive_id)?;
+        validate_field(&selection.name, "artwork name")?;
+        validate_field(&selection.query, "artwork query")?;
         let mut edited = self.clone();
         let cards = match face {
             Face::Front => &mut edited.fronts,
             Face::Back => &mut edited.backs,
         };
+        if cards
+            .iter()
+            .filter(|card| card.drive_id == drive_id)
+            .count()
+            > 1
+        {
+            return Err(Error::Invalid("this artwork ID refers to multiple sources; edit the decklist to choose the intended entry".into()));
+        }
         let index = cards
             .iter()
             .position(|card| card.drive_id == drive_id)
             .ok_or_else(|| Error::Invalid("this image is no longer in the order".into()))?;
         if cards[index].drive_id == selection.drive_id && cards[index].source == Source::GoogleDrive
         {
+            edited.validate()?;
             return Ok(edited);
         }
         let mut replacement = cards.remove(index);
@@ -36,10 +44,9 @@ impl Order {
         }
         if let Some(existing) = cards
             .iter_mut()
-            .find(|card| card.drive_id == replacement.drive_id)
+            .find(|card| card.drive_id == replacement.drive_id && card.source == replacement.source)
         {
             existing.slots.extend(replacement.slots);
-            existing.source = Source::GoogleDrive;
         } else {
             cards.insert(index, replacement);
         }

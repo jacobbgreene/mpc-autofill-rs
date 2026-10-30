@@ -43,7 +43,7 @@
 
           npmDeps = pkgs.fetchNpmDeps {
             src = ./frontend;
-            hash = "sha256-yeqjH1i17262JCCBjAK879cttwvra5mb3q2scXWbEN4=";
+            hash = "sha256-kkOpVDHPqZuxOguxZXzZVDytWHXuR6P1vfbaJQPHMEg=";
           };
           npmRoot = "frontend";
 

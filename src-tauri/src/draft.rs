@@ -5,6 +5,9 @@ use std::path::Path;
 
 use autofill_core::decklist::ArtworkSelection;
 use autofill_core::new_order::{CardbackSelection, NewOrderOptions};
+use autofill_core::validation::{
+    read_text_file_bounded, validate_drive_id, validate_field, MAX_XML_BYTES,
+};
 use autofill_core::Cardstock;
 use quick_xml::events::Event;
 use serde::{Deserialize, Serialize};
@@ -59,6 +62,19 @@ impl DeckDraft {
         if self.choices.len() > 1_224 {
             return Err("too many artwork choices in deck draft".into());
         }
+        validate_field(&self.name, "deck name").map_err(|e| e.to_string())?;
+        for (key, choice) in &self.choices {
+            let (query, face): (String, String) =
+                serde_json::from_str(key).map_err(|_| "invalid artwork choice key")?;
+            validate_field(&query, "artwork query").map_err(|e| e.to_string())?;
+            if !matches!(face.as_str(), "front" | "back") {
+                return Err("invalid artwork face".into());
+            }
+            validate_choice(choice)?;
+        }
+        if let Some(back) = &self.common_back {
+            validate_choice(back)?;
+        }
         Ok(())
     }
 
@@ -78,7 +94,11 @@ impl DeckDraft {
         let selections = self.selections();
         match self.options().preview(&self.text, &selections) {
             Ok(preview) => {
-                let mut issues = Vec::new();
+                let mut issues: Vec<String> = preview
+                    .issues
+                    .iter()
+                    .map(|issue| issue.message.clone())
+                    .collect();
                 if !preview.unresolved.is_empty() {
                     issues.push(format!(
                         "{} image{} still {} artwork",
@@ -121,6 +141,20 @@ impl DeckDraft {
     }
 }
 
+fn validate_choice(choice: &DraftChoice) -> Result<(), String> {
+    validate_drive_id(&choice.art.drive_id).map_err(|e| e.to_string())?;
+    for (value, label) in [
+        (&choice.art.name, "artwork name"),
+        (&choice.query, "artwork query"),
+        (&choice.art.label, "artwork label"),
+        (&choice.art.source, "artwork source"),
+        (&choice.art.thumb, "artwork thumbnail"),
+    ] {
+        validate_field(value, label).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(rename = "deckDraft")]
 struct XmlDraft {
@@ -157,16 +191,60 @@ pub fn is_xml_draft(xml: &str) -> bool {
     let mut reader = quick_xml::Reader::from_str(xml);
     loop {
         match reader.read_event() {
-            Ok(Event::Start(tag) | Event::Empty(tag)) => {
-                return tag.name().as_ref() == b"deckDraft"
-            }
+            Ok(Event::Start(tag) | Event::Empty(tag)) => return tag.name().as_ref() == "deckDraft",
             Ok(Event::Eof) | Err(_) => return false,
             _ => {}
         }
     }
 }
 
+fn validate_draft_xml(xml: &str) -> Result<(), String> {
+    if xml.len() as u64 > MAX_BYTES {
+        return Err("choose a deck draft under 1.5 MB".into());
+    }
+    let mut reader = quick_xml::Reader::from_str(xml);
+    let mut depth = 0usize;
+    let mut roots = 0;
+    let mut elements = 0;
+    loop {
+        let event = reader.read_event().map_err(|e| e.to_string())?;
+        match event {
+            Event::Start(ref tag) | Event::Empty(ref tag) => {
+                elements += 1;
+                if depth >= 16 || elements > 30_000 || tag.name().as_ref().len() > 128 {
+                    return Err("deck draft XML exceeds structural limits".into());
+                }
+                if depth == 0 {
+                    roots += 1;
+                    if roots != 1 || tag.name().as_ref() != "deckDraft" {
+                        return Err("expected one deckDraft root".into());
+                    }
+                }
+                if tag.attributes().next().is_some() {
+                    return Err("deck draft XML attributes are unsupported".into());
+                }
+                if matches!(event, Event::Start(_)) {
+                    depth += 1;
+                }
+            }
+            Event::End(_) => {
+                depth = depth.checked_sub(1).ok_or("unexpected XML closing tag")?;
+            }
+            Event::DocType(_) | Event::PI(_) => {
+                return Err("deck draft XML declarations are unsupported".into())
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    if roots != 1 || depth != 0 {
+        return Err("incomplete deck draft XML".into());
+    }
+    Ok(())
+}
+
 pub fn decode_xml(xml: &str) -> Result<DeckDraft, String> {
+    validate_draft_xml(xml)?;
     if !is_xml_draft(xml) {
         return Err("not an XML deck draft".into());
     }
@@ -230,7 +308,12 @@ pub fn read_if_draft(path: &Path) -> Result<Option<DeckDraft>, String> {
     if !metadata.is_file() {
         return Err("choose a deck file".into());
     }
-    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let limit = if is_legacy_draft(path) {
+        MAX_BYTES as usize
+    } else {
+        MAX_XML_BYTES
+    };
+    let text = read_text_file_bounded(path, limit).map_err(|e| e.to_string())?;
     if is_legacy_draft(path) {
         if metadata.len() > MAX_BYTES {
             return Err("choose a deck draft under 1.5 MB".into());
@@ -251,6 +334,58 @@ pub fn read_if_draft(path: &Path) -> Result<Option<DeckDraft>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn draft_reader_rejects_oversized_deep_and_declared_xml() {
+        assert!(decode_xml(&format!(
+            "<deckDraft>{}</deckDraft>",
+            "x".repeat(MAX_BYTES as usize)
+        ))
+        .is_err());
+        assert!(decode_xml(&format!(
+            "<deckDraft>{}{}</deckDraft>",
+            "<nested>".repeat(20),
+            "</nested>".repeat(20)
+        ))
+        .is_err());
+        assert!(decode_xml("<!DOCTYPE deckDraft><deckDraft/>").is_err());
+        assert!(decode_xml("<deckDraft/><deckDraft/>").is_err());
+    }
+
+    #[test]
+    fn draft_validation_rejects_hostile_artwork_but_keeps_text_problems_saveable() {
+        let mut draft = DeckDraft {
+            version: 1,
+            text: "0 Island".into(),
+            name: "Needs correction".into(),
+            stock: Cardstock::S30,
+            foil: false,
+            choices: HashMap::new(),
+            common_back: None,
+        };
+        assert!(draft.validate().is_ok());
+        assert!(draft.preview().1.unwrap().contains("quantity"));
+        let choice = DraftChoice {
+            art: DraftArt {
+                drive_id: "../escape".into(),
+                name: "Island".into(),
+                label: String::new(),
+                source: String::new(),
+                dpi: 0,
+                thumb: String::new(),
+            },
+            query: "Island".into(),
+            index: 0,
+            count: 1,
+        };
+        draft.common_back = Some(choice.clone());
+        assert!(draft.validate().is_err());
+        draft.common_back = None;
+        draft
+            .choices
+            .insert("[\"island\",\"front\"]".into(), choice);
+        assert!(draft.validate().is_err());
+    }
 
     #[test]
     fn malformed_decklist_and_artwork_choices_survive_a_draft_round_trip() {
