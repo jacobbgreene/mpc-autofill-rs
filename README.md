@@ -29,7 +29,7 @@ Click either thumbnail to view it at full size.
 
 Download the package for your computer from
 [GitHub Releases](https://github.com/jacobbgreene/mpc-autofill-rs/releases).
-The current preview is [v0.1.5](https://github.com/jacobbgreene/mpc-autofill-rs/releases/tag/v0.1.5).
+The current preview is [v0.1.6](https://github.com/jacobbgreene/mpc-autofill-rs/releases/tag/v0.1.6).
 The packaged builds target 64-bit Intel/AMD computers:
 
 - **Windows 10/11:** run the `-setup.exe` installer. It installs WebView2 if
@@ -48,11 +48,12 @@ sharing an installer outside the repository, include the matching source archive
 
 ## Quick start
 
-1. Choose **Import .txt decklist** or **Paste a decklist**. For pasted text, select
-   **Choose artwork**, then review the images and choose a common card back.
+1. Choose **Import .txt decklist** or **Paste a decklist**. Review the live
+   artwork matches alongside the text and choose a common card back.
    Use **Open deck…** for an existing XML deck.
-2. Select **Create deck** to save it in **Saved decks**. Incomplete imports are
-   saved too; use **Continue import** to finish them before running autofill.
+2. Select **Create deck** to save it in **Saved decks**. Use **Save incomplete
+   deck** for unfinished imports, then **Continue import** to finish them before
+   running autofill.
 3. Select **Start autofill**, sign in when Chrome prompts you, and review the
    completed project in Chrome. Saving to your MPC account and checkout are manual.
 
@@ -88,7 +89,7 @@ Keep the versions in `Cargo.toml`, `Cargo.lock`, `src-tauri/tauri.conf.json`,
 `frontend/package.json`, and `frontend/package-lock.json` in sync. The Nix package
 reads its version from `Cargo.toml`; regenerate its `npmDeps.hash` with the pinned
 Nixpkgs `prefetch-npm-deps` tool whenever the frontend lockfile changes.
-Then push a matching tag (for example, `v0.1.5`). Both platforms must pass before
+Then push a matching tag (for example, `v0.1.6`). Both platforms must pass before
 the workflow creates a draft preview release with installers, a source archive
 of the exact build revision, `SOURCE.json`, `LICENSE`, `NOTICE.md`, and SHA-256
 checksums. Review the assets and publish the draft to share it. A manual workflow

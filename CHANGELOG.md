@@ -11,6 +11,9 @@
 - Restore explicit local-image consent and private snapshots, bounded import and
   image processing, private source-specific caches, isolated browser ownership,
   and cancellable shutdown with bounded cleanup.
+- Restore native window closing without re-entering the close-request handler
+  or blocking the UI thread. Keep unsaved-work confirmation, allow retry after
+  an error, and cap background cleanup so a stalled operation cannot pin exit.
 - Preserve favorite card backs, automatic XML saving, incomplete XML decks,
   legacy draft imports, and the GPLv3 licensing/attribution from later releases.
   Incomplete imports now have a separate **Save incomplete deck** action; complete
