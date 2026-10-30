@@ -16,6 +16,8 @@
   Incomplete imports now have a separate **Save incomplete deck** action; complete
   imports use **Create deck**. Resumed imports retain their saved artwork.
 - Apply import bounds and artwork validation to the newer draft format too.
+- Update Vite and networking dependencies to address newly published security
+  advisories before rebuilding the release packages.
 - Restore browser, native lifecycle, dependency security, and Nix build checks.
   Release builds require every earlier version tag to be in their ancestry.
 
